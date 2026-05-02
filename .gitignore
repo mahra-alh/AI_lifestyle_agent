@@ -36,3 +36,6 @@ backend/src/.env
 
 # Secret replacement file
 replacements.txt
+
+# firebase cache
+.firebase/
