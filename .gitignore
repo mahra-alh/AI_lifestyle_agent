@@ -21,3 +21,18 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Environment variables
+.env
+*.env
+
+# Specific env locations
+backend/.env
+frontend/.env
+backend/src/.env
+
+# Secret / config files
+*.json
+
+# Secret replacement file
+replacements.txt
