@@ -44,4 +44,7 @@ serviceAccountKey.json
 *.pkl      # scikit-learn / pickle models
 *.h5       # Keras / TensorFlow models
 *.pt       # PyTorch models
-*.onnx     # ONNX models
+*.onnx     # ONNX modelsbackend/config/serviceAccountKey.json
+serviceAccountKey.json
+firebase-adminsdk*.json
+backend/data/
