@@ -3,16 +3,15 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from agents import Agent, Runner
 from dotenv import load_dotenv
-from pathlib import Path
-import sys
-
-BASE_DIR = Path(__file__).resolve().parent / "AI Agent"
-sys.path.insert(0, str(BASE_DIR))
-
-from tools.weather_tool import get_weather_forecast
-from tools.calendar_tool import get_calendar, book_activity
-from tools.user_profile import get_user_profile, update_user_profile, log_activity_performance, log_recommendation_feedback
-from logger.app_logger import create_trace_id, set_trace_id, log_event
+from ai_agent.tools.weather_tool import get_weather_forecast
+from ai_agent.tools.calendar_tool import get_calendar, book_activity
+from ai_agent.tools.user_profile import (
+    get_user_profile,
+    update_user_profile,
+    log_activity_performance,
+    log_recommendation_feedback,
+)
+from ai_agent.logger.app_logger import create_trace_id, set_trace_id, log_event
 
 # Load environment variables used by API clients and tools.
 load_dotenv()

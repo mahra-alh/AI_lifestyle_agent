@@ -81,3 +81,7 @@ data/calendar
 # GOOGLE CREDENTIALS (sensitive, should not be committed)
 credentials.json
 token.json
+
+# LEGACY DUPLICATE SOURCE TREE
+# Old copy of the package kept locally during migration to ai_agent/
+AI Agent/
