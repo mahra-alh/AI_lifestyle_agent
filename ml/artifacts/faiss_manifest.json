@@ -1,0 +1,15 @@
+{
+  "created_at_utc": "2026-05-27T14:23:27.184392+00:00",
+  "input_path": "ml\\data\\faiss_corpus.csv",
+  "index_path": "ml\\artifacts\\faiss_index.bin",
+  "lookup_path": "ml\\artifacts\\faiss_lookup.csv",
+  "model_name": "all-MiniLM-L6-v2",
+  "row_count": 11603,
+  "embedding_dimension": 384,
+  "index_type": "IndexFlatIP",
+  "normalized_embeddings": true,
+  "required_columns": [
+    "faiss_text",
+    "venue_id"
+  ]
+}

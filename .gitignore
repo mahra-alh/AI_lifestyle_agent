@@ -71,6 +71,9 @@ backend/data/
 *.bin
 *.npy
 *.csv
+# Allow this small FAISS corpus needed to rebuild artifacts
+!ml/data/
+!ml/data/faiss_corpus.csv
 
 # Explicit exclusion of user profiles (sensitive data)
 data/user_profiles.json
