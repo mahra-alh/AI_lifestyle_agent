@@ -1,0 +1,58 @@
+# Git internals
+.git
+.gitignore
+
+# Virtual environments and Python cache
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+
+# Logs
+*.log
+logs/
+
+# Node (the Python Docker image does not need the Node backend or React frontend)
+node_modules/
+frontend/
+backend/node_modules/
+
+# Build output
+frontend/build/
+coverage/
+
+# IDE / OS files
+.firebase/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Secrets — these must NEVER be baked into a Docker image.
+# Pass them at runtime via environment variables or Secret Manager.
+.env
+credentials.json
+token.json
+backend/config/serviceAccountKey.json
+*secret*.json
+*key*.json
+
+# Large downloaded ML model files (downloaded at runtime from HuggingFace)
+models/
+
+# Training data and notebooks — not needed at runtime
+ml/data/
+ml/notebooks/
+
+# Development scripts — not needed at runtime
+scripts/
+
+# Documentation
+README.md
+DEPLOYMENT.md
+
+# Local data folders
+data/user_profiles.json
+data/weather/
+data/calendar/

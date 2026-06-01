@@ -117,7 +117,7 @@ def get_weather_forecast(
         api_key = os.getenv("WEATHER_API_KEY") or os.getenv("VISUAL_CROSSING_API_KEY")
 
         if not api_key:
-            raise ValueError("Missing WEATHER_API_KEY or VISUAL_CROSSING_API_KEY in .env file.")
+            raise ValueError("Missing WEATHER_API_KEY or VISUAL_CROSSING_API_KEY environment variable.")
 
         encoded_location = quote(location_name.strip())
 

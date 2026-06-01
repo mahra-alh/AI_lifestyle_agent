@@ -14,6 +14,8 @@ Later:
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +26,11 @@ from ml.schemas.recommendation_contracts import (
     RecommendationRequest,
     RecommendationResponse,
     RecommendationItem,
+)
+from ml.lightgbm.feature_builder import (
+    FEATURE_COLUMNS,
+    build_lightgbm_feature_frame,
+    calculate_rule_rank_score,
 )
 
 try:
@@ -87,10 +94,27 @@ class LifestyleRecommender:
             ]
         )
 
+        self.lightgbm_manifest_path = self._find_existing_file(
+            [
+                self.artifacts_dir / "lightgbm_manifest.json",
+                self.models_dir / "lightgbm_manifest.json",
+            ]
+        )
+
+        self.lightgbm_features_path = self._find_existing_file(
+            [
+                self.artifacts_dir / "lightgbm_model_features.json",
+                self.models_dir / "lightgbm_model_features.json",
+            ]
+        )
+
         self.embedding_model = None
         self.faiss_index = None
         self.lookup_df = None
         self.lightgbm_model = None
+        self.lightgbm_manifest: dict[str, Any] | None = None
+        self.artifact_errors: list[str] = []
+        self.artifact_warnings: list[str] = []
 
         self._load_artifacts()
 
@@ -106,16 +130,112 @@ class LifestyleRecommender:
     def _load_artifacts(self) -> None:
         """
         Load FAISS, lookup CSV, embedding model, and optional LightGBM model.
-        This function does not crash if artifacts are missing.
+        This function records artifact problems instead of crashing startup.
         """
 
-        if self.index_path and self.lookup_path and faiss is not None and SentenceTransformer is not None:
-            self.embedding_model = SentenceTransformer(self.embedding_model_name)
-            self.faiss_index = faiss.read_index(str(self.index_path))
-            self.lookup_df = pd.read_csv(self.lookup_path)
+        if faiss is None:
+            self.artifact_errors.append("Python package faiss is not installed.")
 
-        if self.lightgbm_model_path and lgb is not None:
+        if SentenceTransformer is None:
+            self.artifact_errors.append("Python package sentence-transformers is not installed.")
+
+        if self.index_path is None:
+            self.artifact_errors.append("Missing FAISS index file: faiss_index.bin.")
+
+        if self.lookup_path is None:
+            self.artifact_errors.append("Missing FAISS lookup table: faiss_lookup.csv.")
+
+        if self.index_path and self.lookup_path and faiss is not None and SentenceTransformer is not None:
+            try:
+                self.embedding_model = SentenceTransformer(self.embedding_model_name)
+                self.faiss_index = faiss.read_index(str(self.index_path))
+                self.lookup_df = pd.read_csv(self.lookup_path)
+            except Exception as error:
+                self.embedding_model = None
+                self.faiss_index = None
+                self.lookup_df = None
+                self.artifact_errors.append(f"Failed to load FAISS artifacts: {error}")
+
+        self.lightgbm_manifest = self._load_lightgbm_manifest()
+        manifest_valid = self._validate_lightgbm_manifest()
+
+        if lgb is None:
+            self.artifact_warnings.append("Python package lightgbm is not installed; using rule-based ranking fallback.")
+            return
+
+        if self.lightgbm_model_path is None:
+            self.artifact_warnings.append("Missing LightGBM model file: lightgbm_model.txt; using rule-based ranking fallback.")
+            return
+
+        if not manifest_valid:
+            self.artifact_warnings.append("LightGBM manifest is invalid; using rule-based ranking fallback.")
+            return
+
+        try:
             self.lightgbm_model = lgb.Booster(model_file=str(self.lightgbm_model_path))
+        except Exception as error:
+            self.lightgbm_model = None
+            self.artifact_warnings.append(f"Failed to load LightGBM model; using rule-based ranking fallback: {error}")
+
+    def _load_lightgbm_manifest(self) -> dict[str, Any] | None:
+        """
+        Load the LightGBM manifest if it exists.
+        """
+
+        if self.lightgbm_manifest_path is None:
+            self.artifact_warnings.append(
+                "Missing LightGBM manifest file: lightgbm_manifest.json; using rule-based ranking fallback."
+            )
+            return None
+
+        try:
+            with self.lightgbm_manifest_path.open("r", encoding="utf-8") as manifest_file:
+                return json.load(manifest_file)
+        except Exception as error:
+            self.artifact_warnings.append(f"Failed to read LightGBM manifest; using rule-based ranking fallback: {error}")
+            return None
+
+    def _validate_lightgbm_manifest(self) -> bool:
+        """
+        Confirm the saved LightGBM manifest matches the serving feature layout.
+        """
+
+        if self.lightgbm_manifest is None:
+            return False
+
+        manifest_features = self.lightgbm_manifest.get("feature_names")
+
+        if not isinstance(manifest_features, list):
+            self.artifact_warnings.append("LightGBM manifest is missing feature_names.")
+            return False
+
+        if manifest_features != FEATURE_COLUMNS:
+            missing_from_manifest = [name for name in FEATURE_COLUMNS if name not in manifest_features]
+            extra_in_manifest = [name for name in manifest_features if name not in FEATURE_COLUMNS]
+            order_matches = set(manifest_features) == set(FEATURE_COLUMNS)
+            self.artifact_warnings.append(
+                "LightGBM manifest feature_names do not match serving FEATURE_COLUMNS. "
+                f"order_matches={order_matches}; "
+                f"missing_from_manifest={missing_from_manifest}; "
+                f"extra_in_manifest={extra_in_manifest}"
+            )
+            return False
+
+        expected_feature_count = self.lightgbm_manifest.get("n_features")
+        if expected_feature_count is not None:
+            try:
+                expected_feature_count = int(expected_feature_count)
+            except (TypeError, ValueError):
+                self.artifact_warnings.append("LightGBM manifest n_features is not an integer.")
+                return False
+
+            if expected_feature_count != len(FEATURE_COLUMNS):
+                self.artifact_warnings.append(
+                    "LightGBM manifest n_features does not match serving FEATURE_COLUMNS length."
+                )
+                return False
+
+        return True
 
     def recommend(self, request_data: RecommendationRequest | dict[str, Any]) -> RecommendationResponse:
         """
@@ -203,6 +323,64 @@ class LifestyleRecommender:
         faiss_status = "faiss_loaded" if self._faiss_ready() else "faiss_missing"
         lightgbm_status = "lightgbm_loaded" if self.lightgbm_model is not None else "lightgbm_missing"
         return f"{faiss_status}_{lightgbm_status}"
+
+    def get_status(self) -> dict[str, Any]:
+        """
+        Return a compact readiness snapshot for health checks and ops tooling.
+        """
+
+        require_lightgbm = os.getenv("REQUIRE_LIGHTGBM_ARTIFACTS", "false").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        faiss_ready = self._faiss_ready()
+        lightgbm_ready = self.lightgbm_model is not None
+        ready = faiss_ready and (lightgbm_ready or not require_lightgbm)
+
+        return {
+            "ready": ready,
+            "faiss_ready": faiss_ready,
+            "embedding_model_ready": self.embedding_model is not None,
+            "faiss_index_ready": self.faiss_index is not None,
+            "lookup_ready": self.lookup_df is not None,
+            "lightgbm_ready": lightgbm_ready,
+            "lightgbm_required": require_lightgbm,
+            "lightgbm_fallback_active": self.lightgbm_model is None,
+            "model_version": self._model_version(),
+            "artifacts_dir": str(self.artifacts_dir),
+            "artifact_files": {
+                "faiss_index": self._artifact_file_status(self.index_path, "faiss_index.bin"),
+                "faiss_lookup": self._artifact_file_status(self.lookup_path, "faiss_lookup.csv"),
+                "lightgbm_model": self._artifact_file_status(self.lightgbm_model_path, "lightgbm_model.txt"),
+                "lightgbm_manifest": self._artifact_file_status(self.lightgbm_manifest_path, "lightgbm_manifest.json"),
+                "lightgbm_features": self._artifact_file_status(
+                    self.lightgbm_features_path,
+                    "lightgbm_model_features.json",
+                ),
+            },
+            "lightgbm_manifest": {
+                "loaded": self.lightgbm_manifest is not None,
+                "model_type": self.lightgbm_manifest.get("model_type") if self.lightgbm_manifest else None,
+                "target": self.lightgbm_manifest.get("target") if self.lightgbm_manifest else None,
+                "n_features": self.lightgbm_manifest.get("n_features") if self.lightgbm_manifest else None,
+                "serving_n_features": len(FEATURE_COLUMNS),
+            },
+            "artifact_errors": self.artifact_errors,
+            "artifact_warnings": self.artifact_warnings,
+        }
+
+    def _artifact_file_status(self, path: Path | None, filename: str) -> dict[str, Any]:
+        """
+        Return file presence details for health/readiness responses.
+        """
+
+        return {
+            "expected_name": filename,
+            "exists": path is not None and path.exists(),
+            "path": str(path) if path else None,
+            "size_bytes": path.stat().st_size if path is not None and path.exists() else None,
+        }
 
     def _build_query_text(self, request: RecommendationRequest) -> str:
         """
@@ -359,9 +537,34 @@ class LifestyleRecommender:
         - LightGBM will be added after the trained model artifact and feature list are ready.
         """
 
+        feature_frame = build_lightgbm_feature_frame(candidates, request)
+
+        if self.lightgbm_model is not None:
+            predictions = self.lightgbm_model.predict(feature_frame)
+            scored_candidates = []
+
+            for row, prediction in zip(candidates, predictions):
+                scored_row = row.copy()
+                scored_row["_lightgbm_score"] = float(prediction)
+                scored_candidates.append(scored_row)
+
+            return sorted(
+                scored_candidates,
+                key=lambda row: float(row.get("_lightgbm_score", row.get("_similarity_score", 0.0))),
+                reverse=True,
+            )
+
+        fallback_scores = calculate_rule_rank_score(feature_frame)
+        scored_candidates = []
+
+        for row, score in zip(candidates, fallback_scores):
+            scored_row = row.copy()
+            scored_row["_lightgbm_score"] = float(score)
+            scored_candidates.append(scored_row)
+
         return sorted(
-            candidates,
-            key=lambda row: float(row.get("_similarity_score", 0.0)),
+            scored_candidates,
+            key=lambda row: float(row.get("_lightgbm_score", row.get("_similarity_score", 0.0))),
             reverse=True,
         )
 

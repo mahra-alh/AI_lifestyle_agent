@@ -10,7 +10,7 @@ Purpose:
 from __future__ import annotations
 
 from typing import Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 # Input Context Models
 class UserProfileContext(BaseModel):
@@ -19,11 +19,50 @@ class UserProfileContext(BaseModel):
     This should come from the user's stored profile or from newly collected answers.
     """
 
+    # Keep ML-only fields that are present in ml_profile_export.
+    # The feature builder reads these extras directly for ranking.
+    model_config = ConfigDict(extra="allow")
+
     user_email: str = Field(..., description="User email used as the profile identifier.")
 
     budget_level: Literal["free", "low", "medium", "high", "unknown"] = Field(
         default="unknown",
         description="User's preferred budget level."
+    )
+
+    home_area: str | None = Field(
+        default=None,
+        description="Primary Dubai area the user is based in."
+    )
+
+    work_area: str | None = Field(
+        default=None,
+        description="Dubai work area, if relevant."
+    )
+
+    monthly_fun_budget_aed: float | None = Field(
+        default=None,
+        description="Monthly leisure budget in AED."
+    )
+
+    max_per_activity_aed: float | None = Field(
+        default=None,
+        description="Maximum amount the user wants to spend on one activity."
+    )
+
+    max_travel_distance_km: float | None = Field(
+        default=None,
+        description="Maximum travel distance the user is comfortable with."
+    )
+
+    user_latitude: float | None = Field(
+        default=None,
+        description="Optional user latitude if a location tool has already resolved it."
+    )
+
+    user_longitude: float | None = Field(
+        default=None,
+        description="Optional user longitude if a location tool has already resolved it."
     )
 
     preferred_areas: list[str] = Field(
@@ -44,6 +83,46 @@ class UserProfileContext(BaseModel):
     transport_mode: Literal["walking", "car", "taxi", "metro", "unknown"] = Field(
         default="unknown",
         description="Main transport mode used by the user."
+    )
+
+    work_days: list[str] = Field(
+        default_factory=list,
+        description="Days the user usually works."
+    )
+
+    work_start_time: str | None = Field(
+        default=None,
+        description="Typical work start time in HH:MM format."
+    )
+
+    work_end_time: str | None = Field(
+        default=None,
+        description="Typical work end time in HH:MM format."
+    )
+
+    hobbies: list[str] = Field(
+        default_factory=list,
+        description="User hobbies collected from the profile tool."
+    )
+
+    interests: list[str] = Field(
+        default_factory=list,
+        description="User interests collected from the profile tool."
+    )
+
+    preferred_activity_types: list[str] = Field(
+        default_factory=list,
+        description="Preferred activity types from the profile tool."
+    )
+
+    preferred_environment: str | None = Field(
+        default=None,
+        description="Preferred environment, for example indoor, outdoor, or mixed."
+    )
+
+    notes: str | None = Field(
+        default=None,
+        description="Free-form profile notes."
     )
 
     profile_complete: bool = Field(

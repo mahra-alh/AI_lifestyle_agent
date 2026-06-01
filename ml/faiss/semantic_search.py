@@ -1,4 +1,5 @@
-# querying 
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 import faiss
@@ -6,11 +7,13 @@ from sentence_transformers import SentenceTransformer
 
 class FAISSRetriever:
 
-    def __init__(self):
-        # load everything
+    def __init__(self, artifacts_dir=None):
+        ml_dir = Path(__file__).resolve().parents[1]
+        artifacts_path = Path(artifacts_dir) if artifacts_dir else ml_dir / "artifacts"
+
         self.model = SentenceTransformer("all-MiniLM-L6-v2")
-        self.index = faiss.read_index("../models/faiss_index.bin")
-        self.lookup_df = pd.read_csv("../models/faiss_lookup.csv")
+        self.index = faiss.read_index(str(artifacts_path / "faiss_index.bin"))
+        self.lookup_df = pd.read_csv(artifacts_path / "faiss_lookup.csv")
 
     def search(self, query, k=5):
         # convert query into embedding

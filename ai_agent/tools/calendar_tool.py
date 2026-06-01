@@ -7,6 +7,7 @@ book_activity books the approved recommendation into Google Calendar.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -30,14 +31,86 @@ SCOPES = ["https://www.googleapis.com/auth/calendar"]
 DEFAULT_CALENDAR_ID = "primary"
 DEFAULT_TIMEZONE = "Asia/Dubai"
 DEFAULT_LOG_DIR = "data/calendar"
-DEFAULT_CREDENTIALS_PATH = "credentials.json"
-DEFAULT_TOKEN_PATH = "token.json"
+DEFAULT_CREDENTIALS_PATH = os.getenv("GOOGLE_CALENDAR_CREDENTIALS_PATH", "credentials.json")
+DEFAULT_TOKEN_PATH = os.getenv("GOOGLE_CALENDAR_TOKEN_PATH", "token.json")
+GOOGLE_CALENDAR_CREDENTIALS_JSON = os.getenv("GOOGLE_CALENDAR_CREDENTIALS_JSON")
+GOOGLE_CALENDAR_TOKEN_JSON = os.getenv("GOOGLE_CALENDAR_TOKEN_JSON")
+REQUIRE_CALENDAR_AUTH = os.getenv("REQUIRE_CALENDAR_AUTH", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 # Small service cache so repeated tool calls do not rebuild the Calendar API client every time.
 # The cache is keyed by credentials_path and token_path.
 _SERVICE_CACHE: Dict[Tuple[str, str], Any] = {}
 
 # Private helper functions
+def _load_json_secret(value: str, secret_name: str) -> Dict[str, Any]:
+    try:
+        loaded = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{secret_name} must contain valid JSON.") from error
+
+    if not isinstance(loaded, dict):
+        raise ValueError(f"{secret_name} must contain a JSON object.")
+
+    return loaded
+
+
+def get_calendar_auth_status(
+    credentials_path: str = DEFAULT_CREDENTIALS_PATH,
+    token_path: str = DEFAULT_TOKEN_PATH,
+) -> Dict[str, Any]:
+    """
+    Return deployment-safe Calendar auth status without exposing secret values.
+    """
+
+    credentials_file = Path(credentials_path)
+    token_file = Path(token_path)
+
+    credentials_source = None
+    token_source = None
+    token_parse_error = None
+    token_has_refresh_token = False
+
+    if GOOGLE_CALENDAR_CREDENTIALS_JSON:
+        credentials_source = "env_json"
+    elif credentials_file.exists():
+        credentials_source = "file"
+
+    try:
+        if GOOGLE_CALENDAR_TOKEN_JSON:
+            token_info = _load_json_secret(
+                GOOGLE_CALENDAR_TOKEN_JSON,
+                "GOOGLE_CALENDAR_TOKEN_JSON",
+            )
+            token_source = "env_json"
+            token_has_refresh_token = bool(token_info.get("refresh_token"))
+        elif token_file.exists():
+            token_info = json.loads(token_file.read_text(encoding="utf-8"))
+            token_source = "file"
+            token_has_refresh_token = bool(token_info.get("refresh_token"))
+    except Exception as error:
+        token_parse_error = str(error)
+
+    credentials_configured = credentials_source is not None
+    token_configured = token_source is not None and token_parse_error is None
+
+    return {
+        "booking_required": REQUIRE_CALENDAR_AUTH,
+        "credentials_configured": credentials_configured,
+        "credentials_source": credentials_source,
+        "token_configured": token_configured,
+        "token_source": token_source,
+        "token_has_refresh_token": token_has_refresh_token,
+        "token_parse_error": token_parse_error,
+        "interactive_auth_disabled": True,
+        "booking_ready": credentials_configured and token_configured,
+        "manual_login_required": not token_configured,
+    }
+
+
 def _get_calendar_service(
     credentials_path: str = DEFAULT_CREDENTIALS_PATH,
     token_path: str = DEFAULT_TOKEN_PATH,
@@ -58,7 +131,15 @@ def _get_calendar_service(
     token_file = Path(token_path)
     credentials_file = Path(credentials_path)
 
-    if token_file.exists():
+    token_loaded_from_env = False
+
+    if GOOGLE_CALENDAR_TOKEN_JSON:
+        creds = Credentials.from_authorized_user_info(
+            info=_load_json_secret(GOOGLE_CALENDAR_TOKEN_JSON, "GOOGLE_CALENDAR_TOKEN_JSON"),
+            scopes=SCOPES,
+        )
+        token_loaded_from_env = True
+    elif token_file.exists():
         creds = Credentials.from_authorized_user_file(
             filename=str(token_file),
             scopes=SCOPES,
@@ -72,23 +153,34 @@ def _get_calendar_service(
             if not allow_interactive_auth:
                 raise RuntimeError(
                     "Google Calendar is not authenticated. "
-                    "Create or refresh token.json before running the agent, "
+                    "Provide GOOGLE_CALENDAR_TOKEN_JSON, set GOOGLE_CALENDAR_TOKEN_PATH, "
                     "or authenticate in an interactive setup."
                 )
 
-            if not credentials_file.exists():
+            if GOOGLE_CALENDAR_CREDENTIALS_JSON:
+                flow = InstalledAppFlow.from_client_config(
+                    client_config=_load_json_secret(
+                        GOOGLE_CALENDAR_CREDENTIALS_JSON,
+                        "GOOGLE_CALENDAR_CREDENTIALS_JSON",
+                    ),
+                    scopes=SCOPES,
+                )
+            elif credentials_file.exists():
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    client_secrets_file=str(credentials_file),
+                    scopes=SCOPES,
+                )
+            else:
                 raise FileNotFoundError(
                     f"Missing {credentials_path}. Download OAuth credentials from "
-                    "Google Cloud Console and save the file as credentials.json."
+                    "Google Cloud Console and provide it through "
+                    "GOOGLE_CALENDAR_CREDENTIALS_JSON or GOOGLE_CALENDAR_CREDENTIALS_PATH."
                 )
 
-            flow = InstalledAppFlow.from_client_secrets_file(
-                client_secrets_file=str(credentials_file),
-                scopes=SCOPES,
-            )
             creds = flow.run_local_server(port=0)
 
-        token_file.write_text(creds.to_json(), encoding="utf-8")
+        if not token_loaded_from_env:
+            token_file.write_text(creds.to_json(), encoding="utf-8")
 
     # Build the Google Calendar API client used by availability and booking calls.
     service = build("calendar", "v3", credentials=creds)

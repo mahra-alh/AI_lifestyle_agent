@@ -65,6 +65,7 @@ serviceAccountKey.json
 *.h5       # Keras / TensorFlow models
 *.pt       # PyTorch models
 *.onnx     # ONNX models
+*.safetensors  # HuggingFace model weights
 backend/config/serviceAccountKey.json
 firebase-adminsdk*.json
 backend/data/
@@ -74,6 +75,11 @@ backend/data/
 # Allow this small FAISS corpus needed to rebuild artifacts
 !ml/data/
 !ml/data/faiss_corpus.csv
+
+# DOWNLOADED EMBEDDING MODELS
+# Large model weights downloaded from HuggingFace — do not commit.
+# They are downloaded automatically on first startup.
+models/
 
 # Explicit exclusion of user profiles (sensitive data)
 data/user_profiles.json
