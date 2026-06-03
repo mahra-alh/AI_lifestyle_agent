@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from agents import Agent, Runner
 from dotenv import load_dotenv
 from ai_agent.tools.weather_tool import get_weather_forecast
-from ai_agent.tools.calendar_tool import get_calendar, book_activity
+from ai_agent.tools.calendar.full_calendar_tool import get_calendar, book_activity
 from ai_agent.tools.user_profile import (
     get_user_profile,
     update_user_profile,

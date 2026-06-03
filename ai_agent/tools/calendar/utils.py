@@ -1,9 +1,7 @@
 """
 Timezone parsing, datetime validation, and buffer logic.
-
-No Google API calls are made here; this module is pure Python.
 """
-from .config import DEFAULT_TIMEZONE
+from .config import DEFAULT_TIMEZONE # controlled by us 
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List

@@ -1,7 +1,6 @@
-# config.py
+# all defaults are set here
 
 DEFAULT_TIMEZONE = "Asia/Dubai"
-
 
 # OAuth Scope : defines what permissions our application is requesting
 # This permission scope allows the app to read and write Google Calendar data
