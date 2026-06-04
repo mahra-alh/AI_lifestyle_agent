@@ -1,27 +1,30 @@
 from __future__ import annotations
-
-import csv
-import json
-import os
+import csv, json, os # file storage
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
-import requests
+import requests # API communication
+# agent SDK integration
+# required for tool calling (call the weather api tool)
 from agents import function_tool
 from dotenv import load_dotenv
 from ai_agent.logger.app_logger import log_tool_error, log_tool_start, log_tool_success
 
-load_dotenv()
+# should be removed when we push to prod.
+load_dotenv() # load env variable (read the secrets aka. API keys)
 
-# Keep the weather API endpoint and local output folder in one place.
+# global variables
 VISUAL_CROSSING_BASE_URL = (
     "https://weather.visualcrossing.com/"
     "VisualCrossingWebServices/rest/services/timeline"
 )
+
 DEFAULT_WEATHER_OUTPUT_DIR = "data/weather"
 
+
+# save as JSON file and store the response locally
 def _save_json(data: Dict[str, Any], output_path: Path) -> None:
     # Save the full weather result for local inspection.
     output_path.parent.mkdir(parents=True, exist_ok=True)
