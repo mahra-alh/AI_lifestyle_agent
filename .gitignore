@@ -17,8 +17,6 @@ coverage/
 # ENVIRONMENT VARIABLES
 # Main env files (contain secrets or local config)
 .env
-# Any environment-specific files (development, production, local, etc.)
-.env.*
 
 # PYTHON ENVIRONMENTS / CACHE
 # Local virtual environments and Python bytecode cache files
