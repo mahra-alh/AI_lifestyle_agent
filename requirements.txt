@@ -18,6 +18,8 @@ google-api-python-client==2.197.0
 faiss-cpu==1.14.2 # FAISS
 lightgbm==4.6.0 # LightGBM
 scikit-learn==1.9.0
+sentence-transformers==5.5.1 # embeddings
+matplotlib==3.10.9 # plotting (can be removed after prod)
 
 # caching
 redis==8.0.0
