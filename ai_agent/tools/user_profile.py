@@ -41,25 +41,19 @@ VALID_RECOMMENDATION_FEEDBACK = {
     "neutral",
 }
 
-REQUIRED_PROFILE_FIELDS = [
-    "email_address",
-    "home_area",
-    "monthly_fun_budget_aed",
-    "max_per_activity_aed",
-    "work_days",
-    "work_start_time",
-    "work_end_time",
-    "hobbies",
-    "preferred_activity_types",
-]
+REQUIRED_PROFILE_FIELDS = {
+    "home_area": ["home_area", "dubai_area", "area", "location"],
+    "monthly_fun_budget_aed": ["monthly_fun_budget", "monthly budget", "activity budget"],
+    "max_per_activity_aed": ["maximum budget per activity", "single activity budget"],
+    "hobbies": ["hobbies", "interests"],
+    "preferred_activity_types": ["activity types", "type of activities"],
+    "work_days": ["work days", "working days"],
+    "work_start_time": ["work start", "workday starts"],
+    "work_end_time": ["work end", "workday ends"]
+}
 # Tells the agent which fields to ask for when creating a new profile or filling in missing details for an existing profile.
 # The agent should use the "ask" value to prompt the user and the "example" value to understand the expected format of the answer.
 PROFILE_INTAKE_FIELDS = [
-    {
-        "field": "email_address",
-        "ask": "What email should I use for your profile?",
-        "example": "name@example.com",
-    },
     {
         "field": "home_area",
         "ask": "Which Dubai area are you based in?",
@@ -88,7 +82,7 @@ PROFILE_INTAKE_FIELDS = [
     {
         "field": "work_days",
         "ask": "Which days do you usually work?",
-        "example": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+        "example": ["monday to friday"],
     },
     {
         "field": "work_start_time",
@@ -585,10 +579,7 @@ def get_profile_intake_fields(missing_fields: Optional[List[str]] = None) -> Lis
         for field_info in PROFILE_INTAKE_FIELDS
         if field_info["field"] in missing_field_set
     ]
-
-# Expose profile lookup to the agent.
-@function_tool
-def get_user_profile(user_id: str) -> Dict[str, Any]:
+def get_user_profile_data(user_id: str) -> Dict[str, Any]:
 
     # Get the user's saved lifestyle profile.
     tool_name = "get_user_profile"
@@ -608,7 +599,7 @@ def get_user_profile(user_id: str) -> Dict[str, Any]:
 
         if profile is None:
             # Tell the agent exactly which fields it must collect for a new user.
-            missing_fields = REQUIRED_PROFILE_FIELDS.copy()
+            missing_fields = list(REQUIRED_PROFILE_FIELDS.keys())
 
             log_tool_success(
                 tool_name=tool_name,
@@ -664,6 +655,10 @@ def get_user_profile(user_id: str) -> Dict[str, Any]:
             user_id=user_id,
         )
         raise
+# Expose profile lookup to the agent.
+@function_tool
+def get_user_profile(user_id: str) -> Dict[str, Any]:
+    return get_user_profile_data(user_id)
 
 @function_tool
 def update_user_profile(
@@ -1065,9 +1060,7 @@ def log_activity_preference(
         )
         raise
 
-# Expose explicit recommendation feedback logging to the agent.
-@function_tool
-def log_recommendation_feedback(
+def log_recommendation_feedback_data(
     user_id: str,
     recommendation_id: str,
     activity_id: str,
@@ -1212,3 +1205,36 @@ def log_recommendation_feedback(
             }
         )
         raise
+# Expose explicit recommendation feedback logging to the agent.
+@function_tool
+def log_recommendation_feedback(
+    user_id: str,
+    recommendation_id: str,
+    activity_id: str,
+    activity_name: str,
+    feedback: str,
+
+    rating: Optional[int] = None,
+    feedback_reason: Optional[str] = None,
+    recommendation_rank: Optional[int] = None,
+    activity_category: Optional[str] = None,
+    activity_area: Optional[str] = None,
+    model_version: Optional[str] = None,
+    session_id: Optional[str] = None,
+    user_query: Optional[str] = None,
+) -> Dict[str, Any]:
+    return log_recommendation_feedback_data(
+        user_id=user_id,
+        recommendation_id=recommendation_id,
+        activity_id=activity_id,
+        activity_name=activity_name,
+        feedback=feedback,
+        rating=rating,
+        feedback_reason=feedback_reason,
+        recommendation_rank=recommendation_rank,
+        activity_category=activity_category,
+        activity_area=activity_area,
+        model_version=model_version,
+        session_id=session_id,
+        user_query=user_query,
+)

@@ -125,6 +125,34 @@ app.get("/api/test", async (req, res) => {
   );
 });
 
+app.get("/api/profile/:user_id", async (req, res) => {
+  const userId = String(req.params.user_id || "").trim().toLowerCase();
+
+  if (!userId) {
+    return res.status(400).json({
+      ok: false,
+      error: "user_id cannot be empty",
+    });
+  }
+
+  const pythonResponse = await fetchJson(
+    `${PYTHON_AGENT_URL}/api/profile/${encodeURIComponent(userId)}`,
+    {},
+    30000
+  );
+
+  res.status(pythonResponse.status).json(pythonResponse.body);
+});
+
+app.post("/api/feedback", async (req, res) => {
+  const pythonResponse = await fetchJson(`${PYTHON_AGENT_URL}/api/feedback`, {
+    method: "POST",
+    body: JSON.stringify(req.body || {}),
+  }, 30000);
+
+  res.status(pythonResponse.status).json(pythonResponse.body);
+});
+
 app.post("/api/chat", async (req, res) => {
   const { user_id, user_message } = req.body || {};
 

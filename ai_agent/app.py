@@ -1,4 +1,5 @@
 import os
+import asyncio
 import uuid
 from datetime import datetime
 from typing import Any, Literal
@@ -9,6 +10,7 @@ from ai_agent.tools.weather_tool import get_weather_forecast
 from ai_agent.tools.calendar_tool import get_calendar, book_activity
 from ai_agent.tools.user_profile import (
     build_ml_profile_export,
+    get_user_profile_data,
     get_user_profile,
     update_user_profile,
     log_activity_preference,
@@ -31,6 +33,11 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 APP_TIMEZONE = "Asia/Dubai"
 
 _ML_RECOMMENDER: LifestyleRecommender | None = None
+
+# Per-user conversation history. Keyed by normalized user_id (email).
+# Stores the full message list returned by Runner.to_input_list() so each
+# turn continues the same conversation rather than starting fresh.
+_CONVERSATION_HISTORY: dict[str, list] = {}
 
 
 def _get_ml_recommender() -> LifestyleRecommender:
@@ -70,7 +77,7 @@ def get_ml_recommendations(
     Build the ML request from the saved profile and return ranked recommendations.
     """
 
-    profile_result = get_user_profile(user_id)
+    profile_result = get_user_profile_data(user_id)
 
     if not bool(profile_result.get("profile_complete", False)):
         return {
@@ -113,7 +120,27 @@ def get_ml_recommendations(
         top_k=top_k,
     )
 
+# Call the ML recommender and return the response along with the original request for traceability.
     response = _get_ml_recommender().recommend(request)
+    response_payload = response.model_dump()
+
+    recommendation_items = []
+    for rank, item in enumerate(response_payload.get("items", []), start=1):
+        recommendation_items.append(
+            {
+                "recommendation_id": f"{request.request_id}_{rank}",
+                "activity_id": item.get("activity_id"),
+                "activity_name": item.get("name"),
+                "recommendation_rank": rank,
+                "model_version": response_payload.get("model_version"),
+                "score": item.get("score"),
+                "category": item.get("category"),
+                "area": item.get("area"),
+                "reason": item.get("reason"),
+                "source": response_payload.get("source"),
+                "user_query": user_query,
+            }
+        )
 
     return {
         "success": True,
@@ -121,7 +148,8 @@ def get_ml_recommendations(
         "profile_complete": bool(profile_result.get("profile_complete", False)),
         "used_ml_profile_export": used_cached_ml_profile_export,
         "request_id": request.request_id,
-        "response": response.model_dump(),
+        "response": response_payload,
+        "recommendation_items": recommendation_items,
     }
 
 # Define the agent instructions, available tools, and model.
@@ -135,16 +163,18 @@ Your job is to help users discover and schedule suitable activities based on the
 The user's profile is identified by email address.
 
 Available tools:
-- user_profile
-- activity_preferences_log
-- recommendation_feedback_log
-- get_ml_recommendations
-- weather
-- get_calendar
-- book_activity
+get_weather_forecast,
+get_calendar, 
+book_activity,
+build_ml_profile_export,
+get_user_profile_data, 
+get_user_profile, 
+update_user_profile, 
+log_activity_preference, 
+log_recommendation_feedback
 
-    The ML recommendation tool is available. Use it once the profile, calendar,
-    and weather context are available.
+The ML recommendation tool is available. Use it once the profile, calendar,
+and weather context are available.
 If a complete profile is already provided in the input, do not ask for more profile fields.
 Give a recommendation instead of stopping at intake questions.
 
@@ -152,13 +182,13 @@ Main flow:
 
 When the user asks for recommendations or activity planning:
 
-1. Ask for the user's email address first. This is required to look up their profile and preferences. Do not proceed without it.
-2. Search the user profile by email using the user_profile tool.
-   Use the email address as the user_id argument for profile tools.
-3. If the profile exists:
+1. The user's email is already provided as Known user_id/email. Never ask the user for their email again.
+2. Search the user profile using the known user_id/email.
+3. Use the known user_id/email as the user_id argument for all profile tools.
+4. If the profile exists:
    - If profile_complete is true, use the saved profile and continue the activity planning flow.
    - If profile_complete is false, ask only for the missing_fields returned by the tool.
-4. If the profile does not exist:
+5. If the profile does not exist:
    - Ask the user to provide the required_fields returned by get_user_profile.
    - Do not create example values for the user.
    - After the user provides the details, save them using update_user_profile.
@@ -185,7 +215,7 @@ When the user reacts to a suggestion:
 - Log the feedback using recommendation_feedback_log.
 
 Rules:
-- Do not ask for full profile details before checking the email.
+- Do not ask for the email. It is already provided as Known user_id/email.
 - Do not ask for profile details if the profile already exists.
 - If the profile exists but is incomplete, ask only for the missing fields.
 - Do not invent profile information.
@@ -216,47 +246,58 @@ Rules:
     model="gpt-4o-mini",
 )
 
-def run_agent(user_id: str, user_message: str):
+async def run_agent(user_id: str, user_message: str):
     # Create a trace ID so logs from this request can be grouped together.
     trace_id = create_trace_id()
     set_trace_id(trace_id)
 
-    # Log the incoming request without storing the full message content.
     log_event(
         event_name="agent_request_started",
         user_id=user_id,
-        data={
-            "input_length": len(user_message),
-        }
+        data={"input_length": len(user_message)},
     )
 
     try:
         now_dubai = datetime.now(ZoneInfo(APP_TIMEZONE)).isoformat()
+        existing_history = _CONVERSATION_HISTORY.get(user_id, [])
 
-        # Run the agent with the known email so profile tools use a stable user ID.
-        result = Runner.run_sync(
-            agent,
-            input=(
+        if existing_history:
+            # Continue the existing conversation. The user_id context is already
+            # in the history from the first turn, so only inject the current time.
+            run_input = existing_history + [
+                {
+                    "role": "user",
+                    "content": (
+                        f"Current local time ({APP_TIMEZONE}): {now_dubai}\n\n"
+                        f"User message:\n{user_message}"
+                    ),
+                }
+            ]
+        else:
+            # First turn: establish user identity and time context for the whole session.
+            run_input = (
                 f"Known user_id/email for tool calls: {user_id}\n\n"
                 f"Current local time ({APP_TIMEZONE}): {now_dubai}\n\n"
                 f"User message:\n{user_message}"
             )
-        )
 
-        # Log successful completion and return the final agent response.
+        result = await Runner.run(agent, input=run_input)
+
+        # Persist the full conversation so the next turn continues from here.
+        _CONVERSATION_HISTORY[user_id] = result.to_input_list()
+
         log_event(
             event_name="agent_request_completed",
             user_id=user_id,
             data={
                 "output_length": len(result.final_output),
                 "status": "success",
-            }
+            },
         )
 
         return result.final_output
 
     except Exception as error:
-        # Log failures with enough detail to debug terminal test runs.
         log_event(
             event_name="agent_request_failed",
             level="ERROR",
@@ -265,12 +306,12 @@ def run_agent(user_id: str, user_message: str):
                 "status": "failed",
                 "error_type": type(error).__name__,
                 "error_message": "Agent request failed.",
-            }
+            },
         )
         raise
     
-def main():
-    # Read a simple terminal input flow for local PowerShell testing.
+async def main():
+    
     default_email = ""
     user_id = input(f"Email [{default_email}]: ").strip() or default_email
 
@@ -283,7 +324,7 @@ def main():
     if not user_message:
         raise ValueError("Message is required.")
 
-    result = run_agent(user_id=user_id, user_message=user_message)
+    result = await run_agent(user_id=user_id, user_message=user_message)
     print(result)
 
     default_recommendation_decision = ""
@@ -300,9 +341,9 @@ def main():
             if recommendation_decision == "accept"
             else "I decline the recommendations."
         )
-        follow_up_result = run_agent(user_id=user_id, user_message=follow_up_message)
+        follow_up_result = await run_agent(user_id=user_id, user_message=follow_up_message)
         print(follow_up_result)
 
 if __name__ == "__main__":
     # Start the local terminal entry point when this file is executed directly.
-    main()
+    asyncio.run(main())

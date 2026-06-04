@@ -61,7 +61,7 @@ class LifestyleRecommender:
     def __init__(
         self,
         artifacts_dir: str | Path | None = None,
-        embedding_model_name: str = "all-MiniLM-L6-v2",
+        embedding_model_name = "models/embeddings/all-MiniLM-L6-v2",
     ):
         self.ml_dir = Path(__file__).resolve().parent
 

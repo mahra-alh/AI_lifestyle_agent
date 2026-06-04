@@ -64,7 +64,7 @@ FEATURE_COLUMNS = [
     "museum",
     "park_attraction",
     "haversine_distance_km",
-    "budget_delta",
+    "budget_diff",
     "budget_score",
     "distance_score",
     "constraint_score",
@@ -443,7 +443,7 @@ def _build_interaction_feature_map(
     venue_budget_level = int(venue_features.get("budget_encoded", 1))
     budget_score = _budget_score(user_budget_level, venue_budget_level)
 
-    budget_delta = _budget_delta(profile_data=profile, venue_features=venue_features)
+    budget_diff = abs(user_budget_level - venue_budget_level)
     travel_pref = int(user_features.get("travel_distance_encoded", 2))
     distance_score = _distance_score(distance_km, travel_pref)
 
@@ -493,7 +493,7 @@ def _build_interaction_feature_map(
 
     return {
         "haversine_distance_km": distance_km,
-        "budget_delta": budget_delta,
+        "budget_diff": budget_diff,
         "budget_score": budget_score,
         "distance_score": distance_score,
         "constraint_score": constraint_score,
@@ -510,7 +510,6 @@ def _build_interaction_feature_map(
         "is_holiday": is_holiday,
     }
 
-
 def _resolve_profile_data(
     request: RecommendationRequest,
     profile_data: Mapping[str, Any] | None = None,
@@ -521,7 +520,6 @@ def _resolve_profile_data(
         resolved.update(dict(profile_data))
 
     return resolved
-
 
 def _candidate_text(candidate: pd.Series) -> str:
     possible_columns = [
@@ -544,7 +542,6 @@ def _candidate_text(candidate: pd.Series) -> str:
 
     return " ".join(values)
 
-
 def _infer_budget_level(candidate: pd.Series, text_lower: str) -> str:
     possible_columns = [
         "budget_level",
@@ -566,7 +563,6 @@ def _infer_budget_level(candidate: pd.Series, text_lower: str) -> str:
 
     return "unknown"
 
-
 def _infer_meal_cost_for_one(candidate: pd.Series, budget_level: str) -> float:
     for column in ["meal_cost_for_one", "price", "price_aed", "cost"]:
         if column in candidate.index and pd.notna(candidate[column]):
@@ -576,25 +572,12 @@ def _infer_meal_cost_for_one(candidate: pd.Series, budget_level: str) -> float:
 
     return float(_BUDGET_TO_PROXY_AED.get(budget_level, np.nan))
 
-
 def _budget_level_to_encoded(level: str) -> int:
     return int(_BUDGET_TO_LEVEL.get(str(level).lower().strip(), 1))
-
 
 def _budget_score(user_budget_level: int, venue_budget_level: int) -> float:
     diff = abs(int(user_budget_level) - int(venue_budget_level))
     return {0: 1.0, 1: 0.5, 2: 0.0}.get(min(diff, 2), 0.0)
-
-
-def _budget_delta(profile_data: Mapping[str, Any], venue_features: Mapping[str, Any]) -> float:
-    venue_cost = _to_float(venue_features.get("meal_cost_for_one"))
-    user_budget = _user_budget_aed_proxy(profile_data)
-
-    if venue_cost is None or isnan(venue_cost) or user_budget is None or isnan(user_budget):
-        return np.nan
-
-    return float(user_budget - venue_cost)
-
 
 def _user_budget_aed_proxy(profile: Mapping[str, Any]) -> float | None:
     for field in ("max_per_activity_aed", "monthly_fun_budget_aed"):
@@ -607,7 +590,6 @@ def _user_budget_aed_proxy(profile: Mapping[str, Any]) -> float | None:
     if isinstance(proxy, float) and isnan(proxy):
         return np.nan
     return float(proxy)
-
 
 def _distance_score(distance_km: float | None, travel_pref: int) -> float:
     if distance_km is None or (isinstance(distance_km, float) and isnan(distance_km)):
@@ -625,7 +607,6 @@ def _distance_score(distance_km: float | None, travel_pref: int) -> float:
     if distance_km <= max_km:
         return 0.3
     return 0.0
-
 
 def _time_score(
     user_features: Mapping[str, Any],
@@ -659,7 +640,6 @@ def _time_score(
 
     return 0.5
 
-
 def _weather_score(weather_pref: int, venue_outdoor: int) -> float:
     if weather_pref == WEATHER_PREF_ANY:
         return 1.0
@@ -670,7 +650,6 @@ def _weather_score(weather_pref: int, venue_outdoor: int) -> float:
     if weather_pref == WEATHER_PREF_INDOOR:
         return 0.4 if venue_outdoor else 1.0
     return 0.8
-
 
 def _infer_open_signals(text_lower: str, candidate: pd.Series) -> dict[str, float]:
     def candidate_number(names: Sequence[str], default: float = 0.0) -> float:
@@ -732,7 +711,6 @@ def _infer_open_signals(text_lower: str, candidate: pd.Series) -> dict[str, floa
         "weekend_open_boost": float(weekend_open_boost),
     }
 
-
 def _infer_diet_flags(profile: Mapping[str, Any], profile_text: str) -> dict[str, int]:
     explicit_flags = {
         "diet_halal": _to_int(profile.get("diet_halal")),
@@ -753,7 +731,6 @@ def _infer_diet_flags(profile: Mapping[str, Any], profile_text: str) -> dict[str
         "diet_vegan": int(_contains_any(text, ["vegan"]) or "vegan" in explicit),
         "diet_gluten_free": int(_contains_any(text, ["gluten free", "gluten-free", "gf"]) or "gluten-free" in explicit or "gluten free" in explicit),
     }
-
 
 def _infer_social_flags(profile: Mapping[str, Any], profile_text: str) -> dict[str, int]:
     explicit_flags = {
@@ -791,7 +768,6 @@ def _infer_social_flags(profile: Mapping[str, Any], profile_text: str) -> dict[s
 
     return flags
 
-
 def _infer_factor_flags(profile: Mapping[str, Any], profile_text: str, user_query: str) -> dict[str, int]:
     explicit_flags = {
         "factor_cost": _to_int(profile.get("factor_cost")),
@@ -824,7 +800,6 @@ def _infer_factor_flags(profile: Mapping[str, Any], profile_text: str, user_quer
         "factor_comfort": factor_comfort,
     }
 
-
 def _infer_adventure_level(profile: Mapping[str, Any], profile_text: str) -> int:
     explicit = profile.get("adventure_level_encoded")
     if explicit is not None:
@@ -841,7 +816,6 @@ def _infer_adventure_level(profile: Mapping[str, Any], profile_text: str) -> int
         return 0
     return 1
 
-
 def _infer_currently_saving_money(profile: Mapping[str, Any], profile_text: str) -> int:
     explicit = profile.get("currently_saving_money")
     if explicit is not None:
@@ -851,7 +825,6 @@ def _infer_currently_saving_money(profile: Mapping[str, Any], profile_text: str)
     if str(profile.get("budget_level", "unknown")).lower().strip() in {"free", "low"}:
         return 1
     return int(_contains_any(text, ["saving money", "budget", "cheap", "affordable", "low cost"]))
-
 
 def _infer_going_out_frequency(profile: Mapping[str, Any]) -> int:
     explicit = profile.get("going_out_frequency_encoded")
@@ -876,7 +849,6 @@ def _infer_going_out_frequency(profile: Mapping[str, Any]) -> int:
         return 1
 
     return 2
-
 
 def _infer_activity_duration(request: RecommendationRequest) -> int:
     explicit = _to_int(getattr(request.profile, "activity_duration_encoded", None))
@@ -905,7 +877,6 @@ def _infer_activity_duration(request: RecommendationRequest) -> int:
     if duration_hours <= 6:
         return 2
     return 3
-
 
 def _infer_exclusion_flags(
     profile: Mapping[str, Any],
@@ -940,7 +911,6 @@ def _infer_exclusion_flags(
         "excl_outdoor_travel": excl_outdoor_travel,
     }
 
-
 def _encode_travel_distance(profile: Mapping[str, Any]) -> int:
     explicit = profile.get("travel_distance_encoded")
     value = _to_int(explicit)
@@ -961,7 +931,6 @@ def _encode_travel_distance(profile: Mapping[str, Any]) -> int:
         return 3
     return 4
 
-
 def _encode_weather_preference(profile: Mapping[str, Any], request: RecommendationRequest | None = None) -> int:
     explicit = profile.get("weather_pref_encoded")
     value = _to_int(explicit)
@@ -980,7 +949,6 @@ def _encode_weather_preference(profile: Mapping[str, Any], request: Recommendati
         return WEATHER_PREF_INDOOR
 
     return WEATHER_PREF_ANY
-
 
 def _encode_time_of_day_preferences(
     profile: Mapping[str, Any],
@@ -1010,7 +978,6 @@ def _encode_time_of_day_preferences(
 
     return {slot: int(slot == active_slot) for slot in TIME_SLOT_FEATURES}
 
-
 def _category_flag(candidate: pd.Series, text_lower: str, feature_name: str) -> int:
     if feature_name in candidate.index and pd.notna(candidate[feature_name]):
         return int(bool(_to_int(candidate[feature_name]) or _to_float(candidate[feature_name])))
@@ -1025,7 +992,6 @@ def _location_flag(candidate: pd.Series, text_lower: str, feature_name: str) -> 
 
     keywords = VENUE_LOCATION_KEYWORDS.get(feature_name, [])
     return int(_contains_any(text_lower, keywords))
-
 
 def _infer_binary_flag(
     candidate: pd.Series,
@@ -1042,7 +1008,6 @@ def _infer_binary_flag(
 
     return int(_contains_any(text_lower, keywords))
 
-
 def _infer_area_from_text(text_lower: str) -> dict[str, Any] | None:
     aliases: list[tuple[str, dict[str, Any]]] = []
     for area in DUBAI_AREAS.values():
@@ -1055,7 +1020,6 @@ def _infer_area_from_text(text_lower: str) -> dict[str, Any] | None:
             return area
 
     return None
-
 
 def _resolve_user_location(profile: Mapping[str, Any]) -> dict[str, Any] | None:
     user_lat = _to_float(profile.get("user_latitude"))
@@ -1073,7 +1037,6 @@ def _resolve_user_location(profile: Mapping[str, Any]) -> dict[str, Any] | None:
 
     return None
 
-
 def _resolve_area(area_value: Any) -> dict[str, Any] | None:
     if area_value is None:
         return None
@@ -1090,7 +1053,6 @@ def _resolve_area(area_value: Any) -> dict[str, Any] | None:
 
     return None
 
-
 def _is_weekend(requested_date: str) -> int:
     try:
         parsed = datetime.fromisoformat(requested_date).date()
@@ -1100,13 +1062,11 @@ def _is_weekend(requested_date: str) -> int:
     # Dubai leisure planning often treats Friday as a weekend-adjacent day.
     return int(parsed.weekday() >= 4)
 
-
 def _is_dinner_request(requested_start_time: str) -> int:
     parsed = _parse_time(requested_start_time)
     if parsed is None:
         return 0
     return int(parsed.hour >= 17 or parsed.hour < 2)
-
 
 def _parse_time(value: str | None) -> datetime | None:
     if not value:
@@ -1124,7 +1084,6 @@ def _parse_time(value: str | None) -> datetime | None:
     except ValueError:
         return None
 
-
 def _time_diff_hours(start: datetime, end: datetime) -> float | None:
     start_minutes = start.hour * 60 + start.minute
     end_minutes = end.hour * 60 + end.minute
@@ -1132,7 +1091,6 @@ def _time_diff_hours(start: datetime, end: datetime) -> float | None:
     if diff <= 0:
         return None
     return diff / 60.0
-
 
 def _datetime_diff_hours(start: str, end: str) -> float | None:
     try:
@@ -1144,7 +1102,6 @@ def _datetime_diff_hours(start: str, end: str) -> float | None:
     diff = (end_dt - start_dt).total_seconds() / 3600.0
     return diff if diff > 0 else None
 
-
 def _contains_any(text: str, phrases: Sequence[str]) -> bool:
     normalized = text.lower()
     for phrase in phrases:
@@ -1153,7 +1110,6 @@ def _contains_any(text: str, phrases: Sequence[str]) -> bool:
         if re.search(rf"\b{re.escape(phrase.lower())}\b", normalized):
             return True
     return False
-
 
 def _joined(values: Any) -> str:
     if values is None:
@@ -1164,7 +1120,6 @@ def _joined(values: Any) -> str:
         return " ".join(str(value) for value in values if value is not None)
     return str(values)
 
-
 def _as_list(value: Any) -> list[Any]:
     if value is None:
         return []
@@ -1174,17 +1129,14 @@ def _as_list(value: Any) -> list[Any]:
         return list(value)
     return [value]
 
-
 def _tokens(text: str) -> list[str]:
     return re.findall(r"[a-zA-Z0-9]+", text.lower())
-
 
 def _get_value(candidate: pd.Series, possible_columns: Sequence[str], default: Any = None) -> Any:
     for column in possible_columns:
         if column in candidate.index and pd.notna(candidate[column]):
             return candidate[column]
     return default
-
 
 def _to_float(value: Any) -> float | None:
     if value is None:
@@ -1194,7 +1146,6 @@ def _to_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
 
-
 def _to_int(value: Any) -> int | None:
     if value is None:
         return None
@@ -1202,7 +1153,6 @@ def _to_int(value: Any) -> int | None:
         return int(float(value))
     except (TypeError, ValueError):
         return None
-
 
 def _is_missing_number(value: Any) -> bool:
     numeric = _to_float(value)

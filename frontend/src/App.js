@@ -1,28 +1,29 @@
-import { useEffect } from 'react';
-import logo from './logo.svg';
-import './App.css';
+import { useState } from "react";
+import EmailEntry from "./components/EmailEntry";
+import ChatWindow from "./components/ChatWindow";
+
+const API_BASE = (process.env.REACT_APP_API_URL || "").replace(/\/$/, "");
 
 function App() {
-  const apiBaseUrl = (process.env.REACT_APP_API_URL || '').replace(/\/$/, '');
-  const apiPath = apiBaseUrl ? `${apiBaseUrl}/api/test` : '/api/test';
+  const [userEmail, setUserEmail] = useState(null);
+  const [profile, setProfile] = useState(null);
 
-  useEffect(() => {
-    fetch(apiPath)
-      .then(res => res.json())
-      .then(data => console.log('Backend says:', data))
-      .catch(err => console.error(err));
-  }, [apiPath]);
+  async function handleEmailSubmit(email) {
+    setUserEmail(email);
 
-  return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>Backend connection test — check console 👀</p>
-      </header>
-    </div>
-  );
+    const res = await fetch(
+      `${API_BASE}/api/profile/${encodeURIComponent(email)}`
+    );
+
+    const data = await res.json();
+    setProfile(data);
+  }
+
+  if (!userEmail) {
+    return <EmailEntry onEmailSubmit={handleEmailSubmit} />;
+  }
+
+  return <ChatWindow userEmail={userEmail} />;
 }
 
 export default App;
-
-console.log("API URL:", process.env.REACT_APP_API_URL || '(same-origin)');
