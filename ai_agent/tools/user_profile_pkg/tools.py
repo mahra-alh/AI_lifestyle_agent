@@ -24,7 +24,7 @@ from ai_agent.tools.user_profile_pkg.profile_store import (
     get_local_profile,
     get_or_create_local_profile,
     get_profile_intake_fields,
-    load_profile_store,
+    load_profile,
     persist_activity_log,
     persist_feedback_log,
     save_profile_store,
@@ -55,8 +55,7 @@ def get_user_profile_data(user_id: str) -> Dict[str, Any]:
     start_time = log_tool_start(tool_name=tool_name, user_id=user_id, data={"operation": "read_profile"})
 
     try:
-        data = load_profile_store()
-        profile = get_local_profile(data, user_id)
+        profile = load_profile(user_id)
 
         if profile is None:
             missing_fields = list(REQUIRED_PROFILE_FIELDS.keys())
@@ -240,10 +239,9 @@ def update_user_profile(
         if notes is not None:
             updates["notes"] = notes.strip()
 
-        data = load_profile_store()
-        saved = get_or_create_local_profile(data, user_id)
+        saved = get_or_create_profile(user_id)
         saved.update(updates)
-        save_profile_store(data)
+        save_profile(user_id, saved)
         missing_fields = find_missing_profile_fields(saved)
 
         log_tool_success(
@@ -352,12 +350,11 @@ def log_activity_preference(
         if model_version is not None:
             log_entry["model_version"] = model_version.strip()
 
-        data = load_profile_store()
-        profile = get_or_create_local_profile(data, user_id)
+        profile = get_or_create_profile(user_id)
         profile["activity_preferences_log_count"] = int(profile.get("activity_preferences_log_count", 0)) + 1
         profile["last_activity_preference_log_at"] = created_at
         profile["updated_at"] = created_at
-        save_profile_store(data)
+        save_profile(user_id, profile)
         persist_activity_log(log_entry)
 
         log_tool_success(
@@ -458,12 +455,11 @@ def log_recommendation_feedback(
         if user_query is not None:
             feedback_entry["user_query"] = user_query.strip()
 
-        data = load_profile_store()
-        profile = get_or_create_local_profile(data, user_id)
+        profile = get_or_create_profile(user_id)
         profile["recommendation_feedback_count"] = int(profile.get("recommendation_feedback_count", 0)) + 1
         profile["last_recommendation_feedback_at"] = created_at
         profile["updated_at"] = created_at
-        save_profile_store(data)
+        save_profile(user_id, profile)
         persist_feedback_log(feedback_entry)
 
         log_tool_success(
