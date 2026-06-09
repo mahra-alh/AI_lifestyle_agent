@@ -1,212 +1,122 @@
-// PURPOSE: Upload venue data from CSV into Firebase
+// PURPOSE: Upload venue data (unified_venue_pool + faiss_corpus) to Firestore.
+//
+// Both files are uploaded in row-order, and every document receives an `index`
+// field so the two collections can be joined back by position (row 0 in
+// unified_venue_pool corresponds to index=0 in faiss_corpus, and vice-versa).
+//
+// Run:  node import_venues_to_firestore.js
 
-// Built-in Node.js module for reading files
-const fs = require("fs");
-
-// CSV parser package, reads CSV row-by-row
+const fs  = require("fs");
 const csv = require("csv-parser");
-// Firebase Firestore connection
-const db = require("./firebaseAdmin");
+const db  = require("./firebaseAdmin");
+// Add this helper function near the top
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// CONFIGURATION
-// Path to CSV file
-const csvPath = "./data/unified_venue_pool.csv";
+// ─── CONFIGURATION ────────────────────────────────────────────────────────────
 
-// Firestore collection name (think of this like a SQL table)
-const collectionName = "venues";
+const UPLOADS = [
+  // {
+  //   csvPath:        "../ai_agent/data/unified_venue_pool.csv",
+  //   collectionName: "venues",
+  // },
+  {
+    csvPath:        "../ai_agent/data/faiss_corpus.csv",
+    collectionName: "faiss_corpus",
+  },
+];
 
-// Firestore maximum batch size (upload in chunks)
 const BATCH_SIZE = 500;
 
-// DATA CLEANING FUNCTION (safety net to clean CSV values before upload)
-//
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
 
 function cleanValue(value) {
-  // Convert invalid values into null (Firestore handles null cleanly)
-  if (
-    value === "" ||
-    value === "NaN" ||
-    value === "nan" ||
-    value === undefined
-  ) {
+  if (value === "" || value === "NaN" || value === "nan" || value === undefined) {
     return null;
   }
-
-  // Try convert into a number ("25.4" → 25.4)
   const num = Number(value);
-
-  // If value is a valid number, store it as numeric type
-  if (
-    !isNaN(num) &&
-    String(value).trim() !== ""
-  ) {
+  if (!isNaN(num) && String(value).trim() !== "") {
     return num;
   }
-  // Otherwise keep original string/text
   return value;
 }
 
-// CSV UPLOAD FUNCTION
-async function uploadCSV() {
-  // Temporary array storing all rows
-  const rows = [];
-  // READ CSV FILE
-  console.log("READING CSV FILE...\n");
-  fs.createReadStream(csvPath)
-    // Send CSV stream into parser
-    .pipe(csv())
+// Read a CSV file and return a Promise that resolves to an array of cleaned rows.
+function readCSV(csvPath) {
+  return new Promise((resolve, reject) => {
+    const rows = [];
+    console.log(`\nREADING: ${csvPath}`);
 
-    // Runs ONCE for every row in CSV
-    .on("data", (row) => {
-      // Object holding cleaned row values
-      const cleanedRow = {};
-
-      // Loop through every column
-      for (const key in row) {
-
-        // Clean each value
-        cleanedRow[key] = cleanValue(
-          row[key]
-        );
-
-      }
-
-      // Store cleaned row
-      rows.push(cleanedRow);
-
-    })
-
-
-
-    // CSV FINISHED LOADING
-    .on("end", async () => {
-
-      console.log("CSV FINISHED LOADING");
-      console.log(
-        `Total rows found: ${rows.length}`
-      );
-
-      // Calculate number of upload batches
-      const totalBatches = Math.ceil(
-        rows.length / BATCH_SIZE
-      );
-
-      console.log(
-        `Total batches required: ${totalBatches}`
-      );
-
-      console.log("STARTING FIRESTORE UPLOAD\n");
-
-      // Upload progress counter
-      let uploaded = 0;
-
-      // Start upload timer
-      console.time("TOTAL UPLOAD TIME");
-
-      // LOOP THROUGH BATCHES
-      for (
-        let i = 0;
-        i < rows.length;
-        i += BATCH_SIZE
-      ) {
-
-        // Current batch number
-        const batchNumber =
-          Math.floor(i / BATCH_SIZE) + 1;
-
-
-
-        console.log(
-          `Starting Batch ${batchNumber}/${totalBatches}`
-        );
-
-        // Create Firestore batch object
-        const batch = db.batch();
-
-        // Current chunk of rows
-        const chunk = rows.slice(
-          i,
-          i + BATCH_SIZE
-        );
-
-        console.log(
-          `Chunk size: ${chunk.length}`
-        );
-
-        // PREPARE DOCUMENTS INSIDE BATCH
-        chunk.forEach((row) => {
-
-          // Unique venue identifier
-          const venueId = row.venue_id;
-
-          // Skip invalid rows
-          if (!venueId) {
-
-            console.log(
-              `Skipped row because venue_id missing`
-            );
-
-            return;
-          }
-
-          const ref = db
-            .collection(collectionName)
-            .doc(String(venueId));
-
-
-
-          // Add document to batch
-          // Nothing uploads yet. We are only PREPARING operations for batch upload
-          batch.set(ref, row);
-
-        });
-
-        // EXECUTE BATCH UPLOAD
-        console.log(
-          `Uploading Batch ${batchNumber}...`
-        );
-
-        await batch.commit();
-        uploaded += chunk.length;
-        // PROGRESS MONITORING
-        console.log(
-          `Finished Batch ${batchNumber}`
-        );
-
-        console.log(
-          `Progress: ${uploaded}/${rows.length}`
-        );
-
-        // Upload completion percentage
-        const percent = (
-          (uploaded / rows.length) * 100
-        ).toFixed(2);
-
-        console.log(
-          `Completion: ${percent}%`
-        );
-
-
-
-        console.log(
-          "---------------------------------\n"
-        );
-
-      }
-
-      // FINISHED
-      console.timeEnd("TOTAL UPLOAD TIME");
-
-
-
-      console.log("ALL VENUES SUCCESSFULLY UPLOADED\n");
-
-      // Safely terminate Node process
-      process.exit();
-
-    });
-
+    fs.createReadStream(csvPath)
+      .pipe(csv())
+      .on("data", (row) => {
+        const cleanedRow = {};
+        for (const key in row) {
+          cleanedRow[key] = cleanValue(row[key]);
+        }
+        rows.push(cleanedRow);
+      })
+      .on("end",  () => resolve(rows))
+      .on("error", reject);
+  });
 }
 
-// START PROGRAM
-uploadCSV();
+// Upload rows to a Firestore collection in batches.
+// Each document gets an `index` field equal to its 0-based row position so the
+// two collections stay aligned even after independent queries.
+async function uploadRows(rows, collectionName) {
+  const totalBatches = Math.ceil(rows.length / BATCH_SIZE);
+  console.log(`\nUPLOADING → ${collectionName}`);
+  console.log(`Total rows : ${rows.length}`);
+  console.log(`Total batches: ${totalBatches}`);
+
+  let uploaded = 0;
+  console.time(`upload:${collectionName}`);
+
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+    const chunk = rows.slice(i, i + BATCH_SIZE);
+    const batch = db.batch();
+
+    chunk.forEach((row, offsetInChunk) => {
+      const globalIndex = i + offsetInChunk;
+
+      const docId = row.venue_id != null ? String(row.venue_id) : String(globalIndex);
+
+      if (row.venue_id == null && collectionName === "venues") {
+        console.warn(`  ⚠ Row ${globalIndex} missing venue_id — using index as doc ID`);
+      }
+
+      const ref = db.collection(collectionName).doc(docId);
+      batch.set(ref, { ...row, index: globalIndex });
+    });
+
+    console.log(`  Batch ${batchNumber}/${totalBatches} — uploading ${chunk.length} docs...`);
+    await batch.commit();
+
+    uploaded += chunk.length;
+    const pct = ((uploaded / rows.length) * 100).toFixed(1);
+    console.log(`  Progress: ${uploaded}/${rows.length} (${pct}%)`);
+
+    await sleep(500); // wait 500ms between batches to avoid quota limits
+  }
+
+  console.timeEnd(`upload:${collectionName}`);
+  console.log(`✓ ${collectionName} upload complete\n`);
+}
+
+// ─── MAIN ─────────────────────────────────────────────────────────────────────
+
+async function main() {
+  for (const { csvPath, collectionName } of UPLOADS) {
+    const rows = await readCSV(csvPath);
+    await uploadRows(rows, collectionName);
+  }
+
+  console.log("ALL COLLECTIONS SUCCESSFULLY UPLOADED");
+  process.exit(0);
+}
+
+main().catch((err) => {
+  console.error("Upload failed:", err);
+  process.exit(1);
+});
