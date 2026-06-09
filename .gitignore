@@ -79,3 +79,4 @@ data/calendar
 # GOOGLE CREDENTIALS (sensitive, should not be committed)
 credentials.json
 token.json
+ml/models/lgbm_ranker.pkl

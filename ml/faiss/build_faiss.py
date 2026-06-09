@@ -10,8 +10,8 @@ from pathlib import Path
 
 
 # load the data
-_BASE = Path(__file__).parent.parent  # ml/
-df = pd.read_csv(_BASE / "data" / "faiss_corpus.csv")
+_BASE = Path(__file__).parents[2]  # project root
+df = pd.read_csv(_BASE / "ai_agent" / "data" / "faiss_corpus.csv")
 
 
 sentences = df["faiss_text"].tolist() 

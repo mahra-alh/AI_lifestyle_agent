@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
+import hashlib
 
 # Shared encoding maps
 # (previously duplicated in feature_builder.py AND user_profile.py)
@@ -221,6 +222,11 @@ def _extract_feature_names(model: Any) -> list[str] | None:
         return list(names)
     return None
 
+def feature_set_hash(columns: Sequence[str] | None = None) -> str:
+    """Return a stable MD5 hash of the feature column list."""
+    cols = list(columns) if columns is not None else list(FEATURE_COLUMNS)
+    return hashlib.md5("|".join(cols).encode()).hexdigest()
+
 
 __all__ = [
     "FEATURE_COLUMNS",
@@ -245,4 +251,5 @@ __all__ = [
     "categorical_indices",
     "diff_columns",
     "assert_booster_matches",
+    "feature_set_hash",
 ]

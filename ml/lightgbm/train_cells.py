@@ -42,6 +42,8 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+import hashlib
+
 
 import joblib
 import lightgbm as lgb
@@ -68,6 +70,7 @@ def _haversine_km(lat1, lon1, lat2, lon2) -> float:
     dlat, dlon = r[2] - r[0], r[3] - r[1]
     a = np.sin(dlat / 2) ** 2 + np.cos(r[0]) * np.cos(r[2]) * np.sin(dlon / 2) ** 2
     return 6371.0 * 2 * np.arcsin(np.sqrt(a))
+
 
 
 # Venue feature builder (training side)
@@ -406,23 +409,27 @@ def train(
     log.info("Round-trip contract assertion passed.")
 
     # Register with model registry
-    registry = ModelRegistry()
-    metadata = registry.register(
-        version=version,
-        artifact_path=str(artifact_path),
-        feature_set_hash=fc.feature_set_hash(),
-        training_rows=len(train_df),
-        label_source=label_source,
-        metrics={"test_mse": test_mse, "best_iteration": model.best_iteration_},
-        notes=notes,
-        status="staging",
-    )
-    log.info(
-        "Registered in model registry as '%s' (status: staging). "
-        "Run with --promote %s to make it active.",
-        version, version,
-    )
-    return metadata
+    try:
+        registry = ModelRegistry()
+        metadata = registry.register(
+            version=version,
+            artifact_path=str(artifact_path),
+            feature_set_hash=fc.feature_set_hash(),
+            training_rows=len(train_df),
+            label_source=label_source,
+            metrics={"test_mse": test_mse, "best_iteration": model.best_iteration_},
+            notes=notes,
+            status="staging",
+        )
+        log.info(
+            "Registered in model registry as '%s' (status: staging). "
+            "Run with --promote %s to make it active.",
+            version, version,
+        )
+        return metadata
+    except RuntimeError as e:
+        log.warning("Skipping model registry: %s", e)
+        return {}
 
 
 def _parse_args() -> argparse.Namespace:
@@ -430,8 +437,9 @@ def _parse_args() -> argparse.Namespace:
         description="Train or promote a LightGBM ranking model.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument("--survey",      default="ml/data/augmented_combined.csv",  help="Path to user survey CSV")
-    p.add_argument("--venue-pool",  default="ml/data/unified_venue_pool.csv",  help="Path to venue pool CSV")
+    
+    p.add_argument("--survey",      default="ai_agent/data/augmented_combined.csv",  help="Path to user survey CSV")
+    p.add_argument("--venue-pool",  default="ai_agent/data/unified_venue_pool.csv",  help="Path to venue pool CSV")
     p.add_argument("--model-out",   default="ml/models/lgbm_ranker.pkl",       help="Output path for the model artifact")
     p.add_argument("--version",     default=datetime.now(timezone.utc).strftime("v%Y.%m.%d"), help="Version string for the registry")
     p.add_argument("--real-labels", action="store_true", help="Use real Firestore feedback instead of synthetic labels")
@@ -443,11 +451,14 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
 
-    # Promote-only mode: no training needed.
+    # Promote-only mode: no training needed
     if args.promote:
-        registry = ModelRegistry()
-        registry.promote(args.promote)
-        log.info("Promoted '%s' to active production.", args.promote)
+        try:
+            registry = ModelRegistry()
+            registry.promote(args.promote)
+            log.info("Promoted '%s' to active production.", args.promote)
+        except RuntimeError as e:
+            log.warning("Skipping model registry: %s", e)
         return
 
     train(

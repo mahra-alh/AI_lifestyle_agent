@@ -4,10 +4,7 @@ Profile store layer.
 Wraps the Firestore storage calls with lightweight in-memory helpers
 so the agent tools stay thin. No @function_tool decorators here.
 
-Firestore structure (one document per user, keyed by normalized email):
-    user_profiles/
-        taherkaasamani@gmail.com   ← document
-        daniagz02@gmail.com        ← document
+Firestore structure (one document per user, keyed by normalized email)
 """
 from __future__ import annotations
 

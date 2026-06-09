@@ -38,23 +38,25 @@ Promoting to production:
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import firebase_admin
 from firebase_admin import credentials, firestore
-import os
 
 _CRED_PATH = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "config/serviceAccountKey.json")
 
-if not firebase_admin._apps:
-    cred = credentials.Certificate(_CRED_PATH)
-    firebase_admin.initialize_app(cred)
-
-_db = firestore.client()
-
 _COLLECTION = "model_registry"
 _ACTIVE_DOC = "__active__"
+
+
+def _get_db():
+    """Return the Firestore client, initializing Firebase on first call."""
+    if not firebase_admin._apps:
+        cred = credentials.Certificate(_CRED_PATH)
+        firebase_admin.initialize_app(cred)
+    return firestore.client()
 
 
 class ModelRegistry:
@@ -65,9 +67,16 @@ class ModelRegistry:
     """
 
     def __init__(self, collection: str = _COLLECTION) -> None:
-        self._col = _db.collection(collection)
+        self._collection = collection
 
+    @property
+    def _col(self):
+        return _get_db().collection(self._collection)
+
+    # ------------------------------------------------------------------
     # Write
+    # ------------------------------------------------------------------
+
     def register(
         self,
         version: str,
@@ -85,20 +94,6 @@ class ModelRegistry:
 
         Does NOT promote it to active automatically — call promote() when
         you are satisfied with offline evaluation.
-
-        Args:
-            version:          Unique version string, e.g. "v2025.06.08".
-            artifact_path:    Path to the serialized model file (local or GCS).
-            feature_set_hash: Hash from ml.schemas.feature_contract.feature_set_hash().
-                              Stored so the serving layer can detect contract drift.
-            training_rows:    Number of training rows used.
-            label_source:     "synthetic" | "real" | "mixed".
-            metrics:          Dict of eval metrics, e.g. {"test_mse": 0.012}.
-            notes:            Free-text notes about this run.
-            status:           "staging" (default) | "active" | "retired".
-
-        Returns:
-            The full metadata dict that was written.
         """
         metadata: Dict[str, Any] = {
             "version": version,
@@ -135,18 +130,15 @@ class ModelRegistry:
                 "Call register() before promote()."
             )
 
-        # Retire the current active version (if any).
         active = self.get_active()
         if active and active.get("version") != version:
             self._col.document(active["version"]).update({"status": "retired"})
 
-        # Mark the new version as active.
         self._col.document(version).update({
             "status": "active",
             "promoted_at": datetime.now(timezone.utc).isoformat(),
         })
 
-        # Update the __active__ pointer.
         self._col.document(_ACTIVE_DOC).set({
             "version": version,
             "promoted_at": datetime.now(timezone.utc).isoformat(),
@@ -156,11 +148,13 @@ class ModelRegistry:
         """Retire a model version without promoting another one."""
         self._col.document(version).update({"status": "retired"})
 
+    # ------------------------------------------------------------------
     # Read
+    # ------------------------------------------------------------------
+
     def get_active(self) -> Optional[Dict[str, Any]]:
         """
         Return the metadata for the current active model version.
-
         Returns None if no version has been promoted yet.
         """
         pointer = self._col.document(_ACTIVE_DOC).get()
@@ -188,20 +182,16 @@ class ModelRegistry:
             status: Filter by status ("staging", "active", "retired").
                     None returns all versions.
             limit:  Max results to return.
-
-        Returns:
-            List of metadata dicts sorted by registered_at descending.
         """
         query = self._col
         if status:
             query = query.where("status", "==", status)
 
         docs = query.stream()
-        results = []
-        for doc in docs:
-            if doc.id == _ACTIVE_DOC:
-                continue
-            results.append(doc.to_dict())
-
+        results = [
+            doc.to_dict()
+            for doc in docs
+            if doc.id != _ACTIVE_DOC
+        ]
         results.sort(key=lambda d: d.get("registered_at", ""), reverse=True)
         return results[:limit]

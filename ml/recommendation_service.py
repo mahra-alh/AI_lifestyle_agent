@@ -14,7 +14,6 @@ Usage (from recommendation_tool.py):
 """
 from __future__ import annotations
 
-import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,15 +29,31 @@ from ml.lightgbm.feature_builder import (
     build_lightgbm_feature_frame,
     calculate_rule_rank_score,
 )
-from ml.registry.model_registry import ModelRegistry
-from ml.schemas.feature_contract import FEATURE_COLUMNS, assert_booster_matches
+from ml.schemas.feature_contract import assert_booster_matches
 from ml.schemas.recommendation_contracts import RecommendationRequest, RecommendationResult
 
-# Model loader, loaded once per process
+# ---------------------------------------------------------------------------
+# Model loader — lazy singleton, nothing touches Firebase at import time
+# ---------------------------------------------------------------------------
 
 _model: Any = None
 _active_version: str = "rule_fallback"
-_registry = ModelRegistry()
+
+# near the top, after other imports
+_venue_pool: Optional[pd.DataFrame] = None
+
+def _get_venue_pool() -> pd.DataFrame:
+    global _venue_pool
+    if _venue_pool is None:
+        import os
+        pool_path = os.getenv("VENUE_POOL_PATH", "ai_agent/data/unified_venue_pool.csv")
+        _venue_pool = pd.read_csv(pool_path)
+    return _venue_pool
+
+def _get_registry():
+    """Instantiate ModelRegistry only when first needed."""
+    from ml.registry.model_registry import ModelRegistry
+    return ModelRegistry()
 
 
 def _load_active_model() -> tuple[Any, str]:
@@ -51,7 +66,7 @@ def _load_active_model() -> tuple[Any, str]:
     global _model, _active_version
 
     try:
-        meta = _registry.get_active()
+        meta = _get_registry().get_active()
         if meta is None:
             return None, "rule_fallback"
 
@@ -60,7 +75,7 @@ def _load_active_model() -> tuple[Any, str]:
             return None, "rule_fallback"
 
         model = joblib.load(artifact_path)
-        assert_booster_matches(model)  # raises if feature contract drifted
+        assert_booster_matches(model)
         _model = model
         _active_version = meta["version"]
         return _model, _active_version
@@ -80,15 +95,9 @@ def get_model() -> tuple[Any, str]:
     return _model, _active_version
 
 
+# ---------------------------------------------------------------------------
 # Cold-start fallback
-_COLD_START_SORT_COLS = [
-    # Prefer venues that are more popular / closer / cheaper.
-    # These column names must exist in the faiss_lookup.csv.
-    # If they are absent the fallback degrades gracefully to FAISS score order.
-    "faiss_score",          # always present
-    "popularity_score",     # optional
-    "haversine_distance_km", # optional — filled from feature builder if absent
-]
+# ---------------------------------------------------------------------------
 
 def _cold_start_rank(
     candidates: pd.DataFrame,
@@ -123,15 +132,16 @@ def _cold_start_rank(
 
     df = df.sort_values(sort_cols, ascending=ascending).reset_index(drop=True)
 
-    # Assign a synthetic score (normalised rank position) so the output
-    # schema is identical to the hot path.
     n = len(df)
     df["model_score"] = [(n - i) / n for i in range(n)]
 
     return df.head(top_n)
 
 
+# ---------------------------------------------------------------------------
 # Main entry point
+# ---------------------------------------------------------------------------
+
 def get_recommendations(
     request: RecommendationRequest,
     top_n: int = 5,
@@ -148,9 +158,10 @@ def get_recommendations(
       4. Cold-start fallback — if the user has no profile, skip reranking
          and use popularity + FAISS score instead
       5. Inference log — write feature vectors to Firestore for retraining
+         (skipped when log_features=False, e.g. during tests)
 
     Args:
-        request:      Structured recommendation request (see recommendation_contracts.py).
+        request:      Structured recommendation request.
         top_n:        Number of final recommendations to return.
         faiss_k:      Number of candidates to retrieve from FAISS before reranking.
         log_features: Write InferenceFeatureLogs to Firestore (set False in tests).
@@ -159,7 +170,6 @@ def get_recommendations(
         RecommendationResult with ranked venues and metadata.
     """
     recommendation_id = f"rec_{uuid.uuid4().hex[:12]}"
-    started_at = datetime.now(timezone.utc).isoformat()
 
     retriever = get_retriever()
     model, model_version = get_model()
@@ -177,7 +187,7 @@ def get_recommendations(
             message="No matching venues found for this query.",
         )
 
-    # Step 2 — Cold-start path (no profile --> popularity fallback)
+    # Step 2 — Cold-start path (no profile → popularity fallback)
     if is_cold_start:
         ranked = _cold_start_rank(
             candidates_df,
@@ -201,9 +211,7 @@ def get_recommendations(
         )
 
     # Step 3 — Feature building
-    candidate_series = [
-        candidates_df.iloc[i] for i in range(len(candidates_df))
-    ]
+    candidate_series = [candidates_df.iloc[i] for i in range(len(candidates_df))]
     feature_frame = build_lightgbm_feature_frame(
         candidates=candidate_series,
         request=request,
@@ -217,9 +225,14 @@ def get_recommendations(
 
     candidates_df = candidates_df.iloc[:len(feature_frame)].copy().reset_index(drop=True)
     candidates_df["model_score"] = scores
-    ranked = candidates_df.sort_values("model_score", ascending=False).head(top_n).reset_index(drop=True)
+    ranked = (
+        candidates_df
+        .sort_values("model_score", ascending=False)
+        .head(top_n)
+        .reset_index(drop=True)
+    )
 
-    # Step 5 — Log feature vectors for retraining
+    # Step 5 — Log feature vectors for retraining (skipped in tests)
     if log_features:
         _log_inference_features(
             ranked_df=ranked,
@@ -246,7 +259,9 @@ def get_recommendations(
     )
 
 
-# Other functions
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
 
 def _profile_is_warm(profile: Any) -> bool:
     """
@@ -277,10 +292,7 @@ def _log_inference_features(
 ) -> None:
     """Write one InferenceFeatureLog row per ranked candidate to Firestore."""
     for rank_pos, row in ranked_df.iterrows():
-        # Match candidate back to its feature row by position in candidates_df.
-        original_pos = candidates_df.index[
-            candidates_df.index == row.name
-        ]
+        original_pos = candidates_df.index[candidates_df.index == row.name]
         if len(original_pos) == 0 or original_pos[0] >= len(feature_frame):
             continue
 
@@ -309,7 +321,35 @@ def _build_recommendation_list(
     model_version: str,
 ) -> List[Dict[str, Any]]:
     """Convert ranked rows into the agent-facing recommendation list."""
+    
+    # Join venue pool to resolve names and metadata
+    pool = _get_venue_pool()
+    ranked_df = ranked_df.merge(pool, on="venue_id", how="left")
+
     results: List[Dict[str, Any]] = []
+    for rank_pos, row in enumerate(ranked_df.itertuples(index=False)):
+        rec: Dict[str, Any] = {
+            "rank": rank_pos + 1,
+            "recommendation_id": recommendation_id,
+            "model_version": model_version,
+            "venue_id": str(getattr(row, "venue_id", f"venue_{rank_pos}")),
+            "name": getattr(row, "name", None) or getattr(row, "venue_name", "Unknown venue"),
+            "model_score": round(float(getattr(row, "model_score", 0.0)), 4),
+            "faiss_score": round(float(getattr(row, "faiss_score", 0.0)), 4),
+        }
+        for col in [
+            "area", "location_area", "category", "primary_category",
+            "meal_cost_for_one", "budget_level", "description",
+            "has_outdoor_seating", "serves_alcohol", "has_shisha",
+            "latitude", "longitude",
+        ]:
+            val = getattr(row, col, None)
+            if val is not None and not (isinstance(val, float) and np.isnan(val)):
+                rec[col] = val
+
+        results.append(rec)
+
+    return results
 
     for rank_pos, row in enumerate(ranked_df.itertuples(index=False)):
         rec: Dict[str, Any] = {
@@ -321,11 +361,12 @@ def _build_recommendation_list(
             "model_score": round(float(getattr(row, "model_score", 0.0)), 4),
             "faiss_score": round(float(getattr(row, "faiss_score", 0.0)), 4),
         }
-        # Include any extra venue metadata columns present in the lookup CSV.
-        for col in ["area", "location_area", "category", "primary_category",
-                    "meal_cost_for_one", "budget_level", "description",
-                    "has_outdoor_seating", "serves_alcohol", "has_shisha",
-                    "latitude", "longitude"]:
+        for col in [
+            "area", "location_area", "category", "primary_category",
+            "meal_cost_for_one", "budget_level", "description",
+            "has_outdoor_seating", "serves_alcohol", "has_shisha",
+            "latitude", "longitude",
+        ]:
             val = getattr(row, col, None)
             if val is not None and not (isinstance(val, float) and np.isnan(val)):
                 rec[col] = val

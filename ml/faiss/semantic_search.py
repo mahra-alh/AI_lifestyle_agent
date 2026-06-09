@@ -21,7 +21,7 @@ from sentence_transformers import SentenceTransformer
 
 # Artifact paths — override via environment variables
 
-_DEFAULT_BASE = Path("ml/models")
+_DEFAULT_BASE = Path(__file__).parents[2] / "models"
 
 FAISS_INDEX_PATH = Path(
     os.getenv("FAISS_INDEX_PATH", str(_DEFAULT_BASE / "faiss_index.bin"))
