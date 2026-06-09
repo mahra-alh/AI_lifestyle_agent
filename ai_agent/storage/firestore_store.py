@@ -9,6 +9,9 @@ Collections:
   activity_preference_logs — implicit signals (clicked/booked/declined)
   recommendation_feedback  — explicit signals (liked/disliked/neutral + rating)
   inference_feature_logs   — feature vectors written at serve time for retraining
+  venues                   — venue metadata (unified_venue_pool), keyed by venue_id
+  faiss_corpus             — FAISS text rows, keyed by venue_id; `index` field
+                             aligns each doc with the corresponding venues doc
 """
 from __future__ import annotations
 
@@ -24,6 +27,9 @@ _COL_PROFILES       = "user_profiles"
 _COL_ACTIVITY_LOGS  = "activity_preference_logs"
 _COL_FEEDBACK_LOGS  = "recommendation_feedback"
 _COL_INFERENCE_LOGS = "inference_feature_logs"
+_COL_VENUES         = "venues"
+_COL_FAISS_CORPUS   = "faiss_corpus"
+
 
 def _get_db():
     """Return the Firestore client, initializing Firebase on first call."""
@@ -84,6 +90,62 @@ def load_single_profile(user_id: str) -> Optional[Dict[str, Any]]:
 def save_single_profile(user_id: str, profile: Dict[str, Any]) -> None:
     """Save one user profile document, merging with existing fields."""
     _get_db().collection(_COL_PROFILES).document(user_id).set(profile, merge=True)
+
+
+# ---------------------------------------------------------------------------
+# Venue pool — loaded once, used by the recommendation service
+# ---------------------------------------------------------------------------
+
+def load_venue_pool() -> "pd.DataFrame":
+    """
+    Load all venue documents from the `venues` Firestore collection and
+    return them as a pandas DataFrame sorted by the `index` field.
+
+    The `index` field was written by import_venues_to_firestore.js and
+    preserves the original row order of unified_venue_pool.csv so that
+    positional alignment with faiss_corpus is maintained.
+    """
+    import pandas as pd
+
+    docs = _get_db().collection(_COL_VENUES).stream()
+    rows = [doc.to_dict() for doc in docs]
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+
+    # Restore original CSV row order so any positional logic is preserved.
+    if "index" in df.columns:
+        df = df.sort_values("index").reset_index(drop=True)
+
+    return df
+
+
+# ---------------------------------------------------------------------------
+# FAISS corpus — loaded by build_faiss.py to (re)build the index
+# ---------------------------------------------------------------------------
+
+def load_faiss_corpus() -> "pd.DataFrame":
+    """
+    Load all documents from the `faiss_corpus` Firestore collection and
+    return them as a pandas DataFrame sorted by the `index` field.
+
+    The `index` field aligns each row with the corresponding row in the
+    `venues` collection so FAISS vector positions match venue_ids.
+    """
+    import pandas as pd
+
+    docs = _get_db().collection(_COL_FAISS_CORPUS).stream()
+    rows = [doc.to_dict() for doc in docs]
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+
+    if "index" in df.columns:
+        df = df.sort_values("index").reset_index(drop=True)
+
+    return df
 
 
 # ---------------------------------------------------------------------------
