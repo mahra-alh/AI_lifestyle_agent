@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 # Pipeline imports — all three upstream modules must be working first
+from agents import function_tool
+
 from .auth import HttpError, get_calendar_service
 from .utils import validate_time_range 
 from .availability import _check_availability
@@ -31,6 +33,7 @@ from .config import DEFAULT_TIMEZONE
 
 # Public tool: book an approved activity
 
+@function_tool
 def book_activity(
     user_approved: bool,
     activity_name: str,

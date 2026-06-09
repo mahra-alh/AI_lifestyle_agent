@@ -6,9 +6,13 @@ import pandas as pd
 import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
+from pathlib import Path
+
 
 # load the data
-df = pd.read_csv("../data/faiss_corpus.csv")
+_BASE = Path(__file__).parent.parent  # ml/
+df = pd.read_csv(_BASE / "data" / "faiss_corpus.csv")
+
 
 sentences = df["faiss_text"].tolist() 
 
@@ -23,7 +27,8 @@ sentence_embedding = model.encode(
 d = sentence_embedding.shape[1] # dimension
 index = faiss.IndexFlatIP(d) # initilize the index
 index.add(sentence_embedding) # add our vectors
-faiss.write_index(index, "../models/faiss_index.bin") # save the index
-df.to_csv( "../models/faiss_lookup.csv", index=False)
+
+faiss.write_index(index, str(_BASE / "models" / "faiss_index.bin"))
+df.to_csv(_BASE / "models" / "faiss_lookup.csv", index=False)
 
 print("FAISS index built successfully")

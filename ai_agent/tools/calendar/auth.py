@@ -26,7 +26,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError  # type: ignore
 from google.auth.exceptions import RefreshError
 
-from .config import SCOPES,DEFAULT_CREDENTIALS_PATH,DEFAULT_TOKEN_PATH
+from config import SCOPES,DEFAULT_CREDENTIALS_PATH,DEFAULT_TOKEN_PATH
 
 # Module-level service cache: avoids rebuilding the API client on every tool call
 # Key: (credentials_path, token_path) tuple

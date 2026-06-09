@@ -1,13 +1,17 @@
 """
 Timezone parsing, datetime validation, and buffer logic.
 """
-from .config import DEFAULT_TIMEZONE # controlled by us 
 from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-# Timezone helpers
+from .config import DEFAULT_TIMEZONE
+
+
+# Timezone
+
 def get_timezone(timezone_str: str) -> ZoneInfo:
     """
     Validate and return an IANA timezone object.
@@ -46,7 +50,8 @@ def to_timezone_iso(datetime_str: str, timezone_str: str) -> str:
     return parsed.astimezone(tz).isoformat()
 
 
-# Datetime parsing
+# Datetime
+
 def parse_datetime(
     datetime_value: str,
     timezone_str: str = DEFAULT_TIMEZONE,
@@ -89,6 +94,7 @@ def parse_datetime(
 
 
 # Validation
+
 def validate_time_range(
     start_time: str,
     end_time: str,
@@ -138,7 +144,7 @@ def validate_time_range(
     }
 
 
-# Buffer helper
+# Buffer 
 def apply_buffer(
     start_dt: datetime,
     end_dt: datetime,
@@ -174,6 +180,7 @@ def apply_buffer(
 
 
 # Busy-slot normalisation
+
 def normalize_busy_slots(
     busy_slots: List[Dict[str, Any]],
     timezone_str: str,

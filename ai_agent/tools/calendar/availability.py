@@ -7,23 +7,28 @@ Two public entry points:
     get_calendar(...)      — agent-facing tool: check a specific slot
     list_upcoming_events() — quick human-readable view of your calendar
 """
-from .config import DEFAULT_TIMEZONE
 from __future__ import annotations
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parents[3]))  # adds project root to path
 
 from datetime import datetime, timezone
 from typing import Any, Dict, List
-
-# Pipeline imports — auth must be set up before this module is useful.
-from .auth import HttpError, get_calendar_service
-from .utils import (
-    DEFAULT_TIMEZONE,
+from agents import function_tool
+from ai_agent.tools.calendar.auth import HttpError, get_calendar_service
+from ai_agent.tools.calendar.config import DEFAULT_TIMEZONE
+from ai_agent.tools.calendar.utils import (
     apply_buffer,
     normalize_busy_slots,
     validate_time_range,
 )
 
 
+# ---------------------------------------------------------------------------
 # Public tool: check a specific time slot
+# ---------------------------------------------------------------------------
+
+@function_tool
 def get_calendar(
     start_time: str,
     end_time: str,
@@ -54,7 +59,10 @@ def get_calendar(
     )
 
 
+# ---------------------------------------------------------------------------
 # Public helper: list upcoming events (human-facing, not an agent tool)
+# ---------------------------------------------------------------------------
+
 def list_upcoming_events(
     max_results: int = 10,
     calendar_id: str = "primary",
@@ -62,9 +70,6 @@ def list_upcoming_events(
 ) -> List[Dict[str, Any]]:
     """
     Fetch and return the next N calendar events from now.
-
-    This is the entry point for "show me my calendar" — it does not check
-    a specific slot but simply lists what is coming up.
 
     Args:
         max_results:  Maximum number of events to return (default 10).
@@ -104,7 +109,10 @@ def list_upcoming_events(
     return [_format_event(event, timezone_str) for event in raw_events]
 
 
+# ---------------------------------------------------------------------------
 # Internal: shared FreeBusy query used by get_calendar and booking.py
+# ---------------------------------------------------------------------------
+
 def _check_availability(
     start_time: str,
     end_time: str,
@@ -206,7 +214,10 @@ def _check_availability(
         }
 
 
+# ---------------------------------------------------------------------------
 # Private helpers
+# ---------------------------------------------------------------------------
+
 def _timing_meta(
     validated: Dict[str, Any],
     checked_start: str,
@@ -241,7 +252,10 @@ def _format_event(event: Dict[str, Any], timezone_str: str) -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
 # CLI entry point — run to view your upcoming events
+# ---------------------------------------------------------------------------
+
 if __name__ == "__main__":
     print("\n📅  Upcoming events\n" + "─" * 40)
 

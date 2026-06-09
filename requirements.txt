@@ -1,25 +1,29 @@
 # project dependencies
 
 # basics
-numpy==2.4.6 
+numpy==2.4.6
 pandas==3.0.3
 
 # agent and tools
-openai-agents==0.17.4 # agent SDK
-requests==2.34.2 # http
-python-dotenv==1.2.2 # env (for prototype)
+openai-agents==0.17.4    # agent SDK
+requests==2.34.2         # http
+python-dotenv==1.2.2     # env
 
 # calendar integration (Google)
 google-auth==2.53.0
 google-auth-oauthlib==1.4.0
 google-api-python-client==2.197.0
 
+# Firebase / Firestore
+firebase-admin==6.5.0
+
 # ML
-faiss-cpu==1.14.2 # FAISS
-lightgbm==4.6.0 # LightGBM
+faiss-cpu==1.14.2            # FAISS semantic search
+lightgbm==4.6.0              # LightGBM ranker
 scikit-learn==1.9.0
-sentence-transformers==5.5.1 # embeddings
-matplotlib==3.10.9 # plotting (can be removed after prod)
+sentence-transformers==5.5.1  # embeddings
+joblib==1.4.2                # model serialization
+matplotlib==3.10.9           # plotting (remove after prod)
 
 # caching
 redis==8.0.0
