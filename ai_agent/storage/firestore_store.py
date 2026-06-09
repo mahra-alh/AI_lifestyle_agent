@@ -1,7 +1,8 @@
 """
 Firestore storage adapter.
 
-Single place in the Python codebase that talks to Firebase Firestore.
+Matches the actual Firestore structure where each user is stored as their
+own document directly in the user_profiles collection:
 
 Collections:
   user_profiles            — one document per user (keyed by normalized email)
@@ -12,64 +13,93 @@ Collections:
 from __future__ import annotations
 
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import firebase_admin
 from firebase_admin import credentials, firestore
 
 
-_CRED_PATH = os.getenv(
-    "FIREBASE_SERVICE_ACCOUNT_PATH",
-    "config/serviceAccountKey.json",
-)
-
-if not firebase_admin._apps:
-    cred = credentials.Certificate(_CRED_PATH)
-    firebase_admin.initialize_app(cred)
-
-_db = firestore.client()
-
 # Collection names
-_COL_PROFILES        = "user_profiles"
-_COL_ACTIVITY_LOGS   = "activity_preference_logs"
-_COL_FEEDBACK_LOGS   = "recommendation_feedback"
-_COL_INFERENCE_LOGS  = "inference_feature_logs"
+_COL_PROFILES       = "user_profiles"
+_COL_ACTIVITY_LOGS  = "activity_preference_logs"
+_COL_FEEDBACK_LOGS  = "recommendation_feedback"
+_COL_INFERENCE_LOGS = "inference_feature_logs"
 
-_STORE_DOC_ID = "store"
+def _get_db():
+    """Return the Firestore client, initializing Firebase on first call."""
+    if not firebase_admin._apps:
+        cred_path = os.getenv(
+            "FIREBASE_SERVICE_ACCOUNT_PATH",
+            "config/serviceAccountKey.json",
+        )
+        cred = credentials.Certificate(cred_path)
+        firebase_admin.initialize_app(cred)
+    return firestore.client()
 
-# Profile store
+
+# ---------------------------------------------------------------------------
+# Profile store — one document per user, keyed by normalized email
+# ---------------------------------------------------------------------------
 
 def load_user_profiles_store() -> Dict[str, Any]:
     """
-    Load the profile store document from Firestore.
+    Load all user profiles from Firestore into the in-memory store format
+    expected by profile_store.py:
 
-    Returns {"user_profiles": {normalized_email: profile_dict, ...}}.
+        {"user_profiles": {normalized_email: profile_dict, ...}}
+
+    Each document in the user_profiles collection is one user.
     """
-    doc = _db.collection(_COL_PROFILES).document(_STORE_DOC_ID).get()
-    if doc.exists:
-        data = doc.to_dict()
-        data.setdefault("user_profiles", {})
-        return data
-    return {"user_profiles": {}}
+    docs = _get_db().collection(_COL_PROFILES).stream()
+    profiles = {}
+    for doc in docs:
+        profiles[doc.id] = doc.to_dict()
+    return {"user_profiles": profiles}
 
 
 def save_user_profiles_store(data: Dict[str, Any]) -> None:
-    """Persist the in-memory profile store back to Firestore."""
-    _db.collection(_COL_PROFILES).document(_STORE_DOC_ID).set(data, merge=True)
+    """
+    Persist updated profiles back to Firestore.
+
+    Writes each user profile as its own document keyed by normalized email.
+    Uses merge=True so only changed fields are overwritten.
+    """
+    profiles = data.get("user_profiles", {})
+    db = _get_db()
+    for email, profile in profiles.items():
+        db.collection(_COL_PROFILES).document(email).set(profile, merge=True)
 
 
+def load_single_profile(user_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Load one user profile directly by document ID (normalized email).
+
+    More efficient than load_user_profiles_store() when you only need
+    one user — avoids reading the entire collection.
+    """
+    doc = _get_db().collection(_COL_PROFILES).document(user_id).get()
+    return doc.to_dict() if doc.exists else None
+
+
+def save_single_profile(user_id: str, profile: Dict[str, Any]) -> None:
+    """Save one user profile document, merging with existing fields."""
+    _get_db().collection(_COL_PROFILES).document(user_id).set(profile, merge=True)
+
+
+# ---------------------------------------------------------------------------
 # Append-only log writers
+# ---------------------------------------------------------------------------
 
 def write_activity_preference_log(log_entry: Dict[str, Any]) -> None:
     """Write one activity preference log entry (implicit signal)."""
     log_id: str = log_entry["log_id"]
-    _db.collection(_COL_ACTIVITY_LOGS).document(log_id).set(log_entry)
+    _get_db().collection(_COL_ACTIVITY_LOGS).document(log_id).set(log_entry)
 
 
 def write_recommendation_feedback_log(feedback_entry: Dict[str, Any]) -> None:
     """Write one recommendation feedback entry (explicit signal)."""
     feedback_id: str = feedback_entry["feedback_id"]
-    _db.collection(_COL_FEEDBACK_LOGS).document(feedback_id).set(feedback_entry)
+    _get_db().collection(_COL_FEEDBACK_LOGS).document(feedback_id).set(feedback_entry)
 
 
 def write_inference_feature_log(log_entry: Dict[str, Any]) -> None:
@@ -80,4 +110,4 @@ def write_inference_feature_log(log_entry: Dict[str, Any]) -> None:
     up directly during retraining without a collection scan.
     """
     doc_id = f"{log_entry['recommendation_id']}_{log_entry['venue_id']}"
-    _db.collection(_COL_INFERENCE_LOGS).document(doc_id).set(log_entry)
+    _get_db().collection(_COL_INFERENCE_LOGS).document(doc_id).set(log_entry)
