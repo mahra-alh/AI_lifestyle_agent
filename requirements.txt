@@ -27,3 +27,9 @@ matplotlib==3.10.9           # plotting (remove after prod)
 
 # caching
 redis==8.0.0
+
+# GCP Secret Manager
+google-cloud-secret-manager==2.23.3
+
+# GCS
+google-cloud-storage==2.19.0
