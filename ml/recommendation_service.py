@@ -7,23 +7,20 @@ Entry point for the agent tool. Handles:
   - Inference feature logging: writes feature vectors to Firestore so
     the feedback loop can retrain on real labels
   - Model loading from the registry: always serves the active model version
-
-Usage (from recommendation_tool.py):
-    from ml.recommendation_service import get_recommendations
-    result = get_recommendations(request)
 """
 from __future__ import annotations
-
+import tempfile
 import uuid
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import io
 import joblib
 import numpy as np
 import pandas as pd
 
-from ml.faiss.semantic_search import get_retriever
 from ml.feedback_join import InferenceFeatureLog, write_inference_log
 from ml.lightgbm.feature_builder import (
     build_lightgbm_feature_frame,
@@ -57,12 +54,6 @@ def _get_registry():
 
 
 def _load_active_model() -> tuple[Any, str]:
-    """
-    Load the active model from the registry.
-
-    Falls back to rule-based scoring if no model is registered or the
-    artifact file is missing.
-    """
     global _model, _active_version
 
     try:
@@ -71,10 +62,36 @@ def _load_active_model() -> tuple[Any, str]:
             return None, "rule_fallback"
 
         artifact_path = meta["artifact_path"]
-        if not Path(artifact_path).exists():
-            return None, "rule_fallback"
 
-        model = joblib.load(artifact_path)
+        if artifact_path.startswith("gs://"):
+            import lightgbm as lgb
+            from ai_agent.storage.google_cloud_storage import download_bytes
+
+            gcs_path = "/".join(artifact_path.split("/")[3:])
+            model_bytes = download_bytes(gcs_path)
+
+            if artifact_path.endswith(".txt"):
+                model_text = model_bytes.decode("utf-8")
+                model = lgb.Booster(model_str=model_text)
+
+            else:
+                with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as tmp:
+                    tmp.write(model_bytes)
+                    tmp.flush()
+                    tmp_path = tmp.name
+
+                model = joblib.load(tmp_path)
+
+        else:
+            if not Path(artifact_path).exists():
+                return None, "rule_fallback"
+
+            if artifact_path.endswith(".txt"):
+                import lightgbm as lgb
+                model = lgb.Booster(model_file=artifact_path)
+            else:
+                model = joblib.load(artifact_path)
+
         assert_booster_matches(model)
         _model = model
         _active_version = meta["version"]
@@ -83,7 +100,8 @@ def _load_active_model() -> tuple[Any, str]:
     except Exception as exc:
         import logging
         logging.getLogger(__name__).warning(
-            "Could not load active model (%s). Falling back to rule-based scoring.", exc
+            "Could not load active model (%s). Falling back to rule-based scoring.",
+            exc,
         )
         return None, "rule_fallback"
 
@@ -170,9 +188,11 @@ def get_recommendations(
         RecommendationResult with ranked venues and metadata.
     """
     recommendation_id = f"rec_{uuid.uuid4().hex[:12]}"
-
-    retriever = get_retriever()
+    
     model, model_version = get_model()
+    from ml.faiss.semantic_search import get_retriever
+    retriever = get_retriever()
+
     is_cold_start = not request.profile or not _profile_is_warm(request.profile)
 
     # Step 1 — FAISS retrieval
