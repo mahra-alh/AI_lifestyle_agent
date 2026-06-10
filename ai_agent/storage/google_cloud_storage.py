@@ -8,8 +8,7 @@ import logging
 from typing import Optional
 
 from google.cloud import storage  # type: ignore
-
-from ai_agent.secrets import get_secret_optional
+from ai_agent.secret_manager import get_secret_optional
 
 logger = logging.getLogger(__name__)
 

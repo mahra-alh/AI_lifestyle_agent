@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 # ── Import secrets first so every downstream module gets populated values ──────
-from ai_agent.secrets import get_secret, get_secret_optional
+from ai_agent.secret_manager import get_secret, get_secret_optional
 
 # Inject OPENAI_API_KEY into the environment so the openai-agents SDK picks it up
 os.environ.setdefault("OPENAI_API_KEY", get_secret("OPENAI_API_KEY"))

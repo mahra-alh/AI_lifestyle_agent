@@ -2,8 +2,7 @@
 from __future__ import annotations
 import os
 from pathlib import Path
-
-from ai_agent.secrets import get_secret, get_secret_optional
+from ai_agent.secret_manager import get_secret, get_secret_optional
 
 #  Weather API
 
