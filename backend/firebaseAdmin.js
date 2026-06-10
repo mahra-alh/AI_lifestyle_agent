@@ -1,18 +1,23 @@
-const path = require("path");
-require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
-
 const admin = require("firebase-admin");
 
-const serviceAccountPath = path.resolve(
-  __dirname,
-  "..",
-  process.env.FIREBASE_SERVICE_ACCOUNT_PATH || "config/serviceAccountKey.json"
-);
-const serviceAccount = require(serviceAccountPath);
+if (!admin.apps.length) {
+  const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
+  if (serviceAccountPath) {
+    // Local dev fallback: explicit service account file
+    const serviceAccount = require(require("path").resolve(serviceAccountPath));
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+    });
+    console.log("Firebase Admin: initialised with service account file.");
+  } else {
+    // Cloud Run / GCE: use Application Default Credentials automatically
+    admin.initializeApp({
+      credential: admin.credential.applicationDefault(),
+    });
+    console.log("Firebase Admin: initialised with Application Default Credentials.");
+  }
+}
 
 const db = admin.firestore();
 

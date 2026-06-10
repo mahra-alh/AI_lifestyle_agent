@@ -6,18 +6,26 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-load_dotenv()
+# ── Import secrets first so every downstream module gets populated values ──────
+from ai_agent.secrets import get_secret, get_secret_optional
 
+# Inject OPENAI_API_KEY into the environment so the openai-agents SDK picks it up
+os.environ.setdefault("OPENAI_API_KEY", get_secret("OPENAI_API_KEY"))
+
+#  Agent imports (after secrets are loaded) 
 from ai_agent.app import run_agent
 from ai_agent.tools.calendar.auth import get_calendar_service
 from ai_agent.tools.calendar.booking import cancel_pending_booking, confirm_pending_booking
 from ai_agent.storage.firestore_store import get_latest_pending_booking_for_user
-from ai_agent.tools.user_profile_pkg import log_recommendation_feedback_data, get_user_profile_data, update_user_profile_data
+from ai_agent.tools.user_profile_pkg import (
+    log_recommendation_feedback_data,
+    get_user_profile_data,
+    update_user_profile_data,
+)
 
-APP_NAME = "AI Lifestyle Agent API"
+APP_NAME    = "AI Lifestyle Agent API"
 APP_VERSION = "0.1.0"
 
 class ProfileSetupRequest(BaseModel):
@@ -41,6 +49,7 @@ class ProfileSetupRequest(BaseModel):
     diet_vegetarian: int = 0
     diet_vegan: int = 0
     diet_gluten_free: int = 0
+
 
 class ChatRequest(BaseModel):
     user_id: str = Field(..., description="Stable user identifier, usually the email address.")

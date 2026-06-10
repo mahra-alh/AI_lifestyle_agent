@@ -12,15 +12,22 @@ Collections:
   venues                   — venue metadata (unified_venue_pool), keyed by venue_id
   faiss_corpus             — FAISS text rows, keyed by venue_id; `index` field
                              aligns each doc with the corresponding venues doc
+
+Changes made:
+- Removed hard-coded credential file path and os.getenv() fallback.
+- Firebase Admin SDK now initialises using Application Default Credentials
+  when running on GC, which is the recommended approach.
 """
 from __future__ import annotations
 
-import os
+import logging
 from typing import Any, Dict, Optional
 
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import firestore
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 # Collection names
 _COL_PROFILES       = "user_profiles"
@@ -34,19 +41,15 @@ _COL_FAISS_CORPUS   = "faiss_corpus"
 def _get_db():
     """Return the Firestore client, initializing Firebase on first call."""
     if not firebase_admin._apps:
-        cred_path = os.getenv(
-            "FIREBASE_SERVICE_ACCOUNT_PATH",
-            "config/serviceAccountKey.json",
-        )
-        cred = credentials.Certificate(cred_path)
-        firebase_admin.initialize_app(cred)
+        # Uses Application Default Credentials.
+        # On Cloud Run, this automatically uses the deployed service account.
+        firebase_admin.initialize_app()
+        logger.info("Firebase: initialised with Application Default Credentials.")
+
     return firestore.client()
 
 
-# ---------------------------------------------------------------------------
 # Profile store — one document per user, keyed by normalized email
-# ---------------------------------------------------------------------------
-
 def load_user_profiles_store() -> Dict[str, Any]:
     """
     Load all user profiles from Firestore into the in-memory store format
@@ -92,10 +95,7 @@ def save_single_profile(user_id: str, profile: Dict[str, Any]) -> None:
     _get_db().collection(_COL_PROFILES).document(user_id).set(profile, merge=True)
 
 
-# ---------------------------------------------------------------------------
 # Venue pool — loaded once, used by the recommendation service
-# ---------------------------------------------------------------------------
-
 def load_venue_pool() -> "pd.DataFrame":
     """
     Load all venue documents from the `venues` Firestore collection and
@@ -121,10 +121,7 @@ def load_venue_pool() -> "pd.DataFrame":
     return df
 
 
-# ---------------------------------------------------------------------------
 # FAISS corpus — loaded by build_faiss.py to (re)build the index
-# ---------------------------------------------------------------------------
-
 def load_faiss_corpus() -> "pd.DataFrame":
     """
     Load all documents from the `faiss_corpus` Firestore collection and
@@ -148,10 +145,7 @@ def load_faiss_corpus() -> "pd.DataFrame":
     return df
 
 
-# ---------------------------------------------------------------------------
 # Append-only log writers
-# ---------------------------------------------------------------------------
-
 def write_activity_preference_log(log_entry: Dict[str, Any]) -> None:
     """Write one activity preference log entry (implicit signal)."""
     log_id: str = log_entry["log_id"]
@@ -175,14 +169,12 @@ def write_inference_feature_log(log_entry: Dict[str, Any]) -> None:
     _get_db().collection(_COL_INFERENCE_LOGS).document(doc_id).set(log_entry)
 
 
-# ---------------------------------------------------------------------------
+
 # Pending bookings — two-step booking confirmation
 #
 # The agent only PREPARES a booking (status "pending"). The calendar write
 # happens later, when the user explicitly confirms via the API. Records are
 # keyed by pending_id.
-# ---------------------------------------------------------------------------
-
 _COL_PENDING_BOOKINGS = "pending_bookings"
 
 

@@ -1,4 +1,4 @@
-# project dependencies
+# requirements.txt
 
 # basics
 numpy==2.4.6
@@ -11,23 +11,27 @@ uvicorn[standard]==0.34.3
 # agent and tools
 openai-agents==0.17.4    # agent SDK
 requests==2.34.2         # http
-python-dotenv==1.2.2     # env
+python-dotenv==1.2.2     # kept for local dev convenience (optional)
 
 # calendar integration (Google)
 google-auth==2.53.0
 google-auth-oauthlib==1.4.0
 google-api-python-client==2.197.0
 
+# Google Cloud — Secret Manager + Storage
+google-cloud-secret-manager==2.20.0
+google-cloud-storage==2.18.2
+
 # Firebase / Firestore
 firebase-admin==6.5.0
 
 # ML
-faiss-cpu==1.14.2            # FAISS semantic search
-lightgbm==4.6.0              # LightGBM ranker
+faiss-cpu==1.14.2
+lightgbm==4.6.0
 scikit-learn==1.9.0
-sentence-transformers==5.5.1  # embeddings
-joblib==1.4.2                # model serialization
-matplotlib==3.10.9           # plotting (remove after prod)
+sentence-transformers==5.5.1
+joblib==1.4.2
+matplotlib==3.10.9
 
 # caching
 redis==8.0.0
