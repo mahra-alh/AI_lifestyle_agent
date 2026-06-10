@@ -2,7 +2,9 @@ import { useState } from "react";
 import MessageList from "./MessageList";
 import MessageInput from "./MessageInput";
 
-const API_BASE = (process.env.REACT_APP_API_URL || "").replace(/\/$/, "");
+const API_BASE = (
+  process.env.REACT_APP_API_URL || "http://127.0.0.1:8000"
+).replace(/\/$/, "");
 
 function ChatWindow({ userEmail }) {
   const [messages, setMessages] = useState([]);
