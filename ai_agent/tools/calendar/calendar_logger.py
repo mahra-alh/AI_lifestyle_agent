@@ -9,12 +9,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
-from .config import DEFAULT_LOG_DIR,DEFAULT_MAX_LOG_SIZE_MB
-
-
-# Default log directory relative to the project root.
-DEFAULT_LOG_DIR = "data/logs"
-DEFAULT_MAX_LOG_SIZE_MB = 5
+from .config import DEFAULT_LOG_DIR, DEFAULT_MAX_LOG_SIZE_MB
 
 
 # Public interface

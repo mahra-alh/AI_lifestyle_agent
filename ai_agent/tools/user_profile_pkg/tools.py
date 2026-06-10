@@ -21,13 +21,12 @@ from ai_agent.tools.user_profile_pkg.ml_export import build_ml_profile_export, r
 from ai_agent.tools.user_profile_pkg.profile_store import (
     TIMEZONE,
     find_missing_profile_fields,
-    get_local_profile,
-    get_or_create_local_profile,
+    get_or_create_profile,
     get_profile_intake_fields,
     load_profile,
     persist_activity_log,
     persist_feedback_log,
-    save_profile_store,
+    save_profile,
     utc_now_iso,
     REQUIRED_PROFILE_FIELDS,
 )
@@ -102,8 +101,7 @@ def get_user_profile(user_id: str) -> Dict[str, Any]:
     return get_user_profile_data(user_id)
 
 
-@function_tool
-def update_user_profile(
+def update_user_profile_data(
     user_id: str,
     # Identity
     email_address: Optional[str] = None,
@@ -273,6 +271,112 @@ def update_user_profile(
 
 
 @function_tool
+def update_user_profile(
+    user_id: str,
+    # Identity
+    email_address: Optional[str] = None,
+    # Budget
+    monthly_fun_budget_aed: Optional[int] = None,
+    max_per_activity_aed: Optional[int] = None,
+    # Location
+    home_area: Optional[str] = None,
+    work_area: Optional[str] = None,
+    preferred_areas: Optional[List[str]] = None,
+    max_travel_distance_km: Optional[float] = None,
+    # Work schedule
+    work_days: Optional[List[str]] = None,
+    work_start_time: Optional[str] = None,
+    work_end_time: Optional[str] = None,
+    # Preferences
+    hobbies: Optional[List[str]] = None,
+    interests: Optional[List[str]] = None,
+    preferred_activity_types: Optional[List[str]] = None,
+    preferred_environment: Optional[str] = None,
+    # ML profile signals
+    budget_encoded: Optional[int] = None,
+    travel_distance_encoded: Optional[int] = None,
+    weather_pref_encoded: Optional[int] = None,
+    pref_morning: Optional[int] = None,
+    pref_midday: Optional[int] = None,
+    pref_afternoon: Optional[int] = None,
+    pref_evening: Optional[int] = None,
+    pref_late_night: Optional[int] = None,
+    diet_halal: Optional[int] = None,
+    diet_vegetarian: Optional[int] = None,
+    diet_vegan: Optional[int] = None,
+    diet_gluten_free: Optional[int] = None,
+    social_friends: Optional[int] = None,
+    social_family: Optional[int] = None,
+    social_partner: Optional[int] = None,
+    social_alone: Optional[int] = None,
+    factor_cost: Optional[int] = None,
+    factor_distance: Optional[int] = None,
+    factor_quality: Optional[int] = None,
+    factor_comfort: Optional[int] = None,
+    adventure_level_encoded: Optional[int] = None,
+    currently_saving_money: Optional[int] = None,
+    going_out_frequency_encoded: Optional[int] = None,
+    activity_duration_encoded: Optional[int] = None,
+    excl_nightlife: Optional[int] = None,
+    excl_cultural: Optional[int] = None,
+    excl_water: Optional[int] = None,
+    excl_outdoor_travel: Optional[int] = None,
+    user_latitude: Optional[float] = None,
+    user_longitude: Optional[float] = None,
+    notes: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Update the user's lifestyle profile fields."""
+    return update_user_profile_data(
+        user_id=user_id,
+        email_address=email_address,
+        monthly_fun_budget_aed=monthly_fun_budget_aed,
+        max_per_activity_aed=max_per_activity_aed,
+        home_area=home_area,
+        work_area=work_area,
+        preferred_areas=preferred_areas,
+        max_travel_distance_km=max_travel_distance_km,
+        work_days=work_days,
+        work_start_time=work_start_time,
+        work_end_time=work_end_time,
+        hobbies=hobbies,
+        interests=interests,
+        preferred_activity_types=preferred_activity_types,
+        preferred_environment=preferred_environment,
+        budget_encoded=budget_encoded,
+        travel_distance_encoded=travel_distance_encoded,
+        weather_pref_encoded=weather_pref_encoded,
+        pref_morning=pref_morning,
+        pref_midday=pref_midday,
+        pref_afternoon=pref_afternoon,
+        pref_evening=pref_evening,
+        pref_late_night=pref_late_night,
+        diet_halal=diet_halal,
+        diet_vegetarian=diet_vegetarian,
+        diet_vegan=diet_vegan,
+        diet_gluten_free=diet_gluten_free,
+        social_friends=social_friends,
+        social_family=social_family,
+        social_partner=social_partner,
+        social_alone=social_alone,
+        factor_cost=factor_cost,
+        factor_distance=factor_distance,
+        factor_quality=factor_quality,
+        factor_comfort=factor_comfort,
+        adventure_level_encoded=adventure_level_encoded,
+        currently_saving_money=currently_saving_money,
+        going_out_frequency_encoded=going_out_frequency_encoded,
+        activity_duration_encoded=activity_duration_encoded,
+        excl_nightlife=excl_nightlife,
+        excl_cultural=excl_cultural,
+        excl_water=excl_water,
+        excl_outdoor_travel=excl_outdoor_travel,
+        user_latitude=user_latitude,
+        user_longitude=user_longitude,
+        notes=notes,
+    )
+
+
+@function_tool
 def log_activity_preference(
     user_id: str,
     activity_id: str,
@@ -381,8 +485,7 @@ def log_activity_preference(
         raise
 
 
-@function_tool
-def log_recommendation_feedback(
+def log_recommendation_feedback_data(
     user_id: str,
     recommendation_id: str,
     activity_id: str,
@@ -484,3 +587,42 @@ def log_recommendation_feedback(
             data={"operation": "write_recommendation_feedback", "recommendation_id": recommendation_id},
         )
         raise
+
+
+@function_tool
+def log_recommendation_feedback(
+    user_id: str,
+    recommendation_id: str,
+    activity_id: str,
+    activity_name: str,
+    feedback: str,
+    rating: Optional[int] = None,
+    feedback_reason: Optional[str] = None,
+    recommendation_rank: Optional[int] = None,
+    activity_category: Optional[str] = None,
+    activity_area: Optional[str] = None,
+    model_version: Optional[str] = None,
+    session_id: Optional[str] = None,
+    user_query: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Log explicit feedback on a recommendation.
+
+    Stores liked/disliked/neutral feedback. Helps evaluate recommendation
+    quality and can become labeled data for LightGBM training.
+    """
+    return log_recommendation_feedback_data(
+        user_id=user_id,
+        recommendation_id=recommendation_id,
+        activity_id=activity_id,
+        activity_name=activity_name,
+        feedback=feedback,
+        rating=rating,
+        feedback_reason=feedback_reason,
+        recommendation_rank=recommendation_rank,
+        activity_category=activity_category,
+        activity_area=activity_area,
+        model_version=model_version,
+        session_id=session_id,
+        user_query=user_query,
+    )

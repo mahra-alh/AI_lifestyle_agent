@@ -58,7 +58,7 @@ REQUESTED_ELEMENTS = ",".join([
 ])
 
 # local storage
-WEATHER_OUTPUT_DIR: Path = Path("data/weather")
+WEATHER_OUTPUT_DIR: Path = Path(__file__).parents[3] / "data" / "weather"
 
 # tool identity 
 WEATHER_TOOL_NAME: str = "get_weather_forecast"

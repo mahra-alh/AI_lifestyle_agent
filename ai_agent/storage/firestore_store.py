@@ -20,7 +20,7 @@ from typing import Any, Dict, Optional
 
 import firebase_admin
 from firebase_admin import credentials, firestore
-
+import pandas as pd
 
 # Collection names
 _COL_PROFILES       = "user_profiles"
@@ -173,3 +173,65 @@ def write_inference_feature_log(log_entry: Dict[str, Any]) -> None:
     """
     doc_id = f"{log_entry['recommendation_id']}_{log_entry['venue_id']}"
     _get_db().collection(_COL_INFERENCE_LOGS).document(doc_id).set(log_entry)
+
+
+# ---------------------------------------------------------------------------
+# Pending bookings — two-step booking confirmation
+#
+# The agent only PREPARES a booking (status "pending"). The calendar write
+# happens later, when the user explicitly confirms via the API. Records are
+# keyed by pending_id.
+# ---------------------------------------------------------------------------
+
+_COL_PENDING_BOOKINGS = "pending_bookings"
+
+
+def create_pending_booking(record: Dict[str, Any]) -> None:
+    """Store a new pending booking record, keyed by its pending_id."""
+    pending_id: str = record["pending_id"]
+    _get_db().collection(_COL_PENDING_BOOKINGS).document(pending_id).set(record)
+
+
+def get_pending_booking(pending_id: str) -> Optional[Dict[str, Any]]:
+    """Return one pending booking record, or None if it doesn't exist."""
+    doc = _get_db().collection(_COL_PENDING_BOOKINGS).document(pending_id).get()
+    return doc.to_dict() if doc.exists else None
+
+
+def update_pending_booking(pending_id: str, updates: Dict[str, Any]) -> None:
+    """Apply partial updates (e.g. status changes) to a pending booking."""
+    _get_db().collection(_COL_PENDING_BOOKINGS).document(pending_id).update(updates)
+
+
+def get_latest_pending_booking_for_user(
+    user_id: str,
+    max_age_seconds: int = 300,
+) -> Optional[Dict[str, Any]]:
+    """
+    Return the most recent still-pending booking for a user, or None.
+
+    Used by the chat endpoint to attach a confirmation card to the response
+    right after the agent prepares a booking. Only records created within
+    max_age_seconds are considered so stale bookings never resurface.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    docs = (
+        _get_db()
+        .collection(_COL_PENDING_BOOKINGS)
+        .where("user_id", "==", user_id)
+        .where("status", "==", "pending")
+        .stream()
+    )
+    records = [doc.to_dict() for doc in docs]
+    if not records:
+        return None
+
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)
+    ).isoformat()
+    fresh = [r for r in records if r.get("created_at", "") >= cutoff]
+    if not fresh:
+        return None
+
+    return max(fresh, key=lambda r: r.get("created_at", ""))

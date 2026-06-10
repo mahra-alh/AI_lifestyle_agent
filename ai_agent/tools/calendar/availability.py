@@ -23,7 +23,6 @@ from ai_agent.tools.calendar.utils import (
     validate_time_range,
 )
 
-
 # ---------------------------------------------------------------------------
 # Public tool: check a specific time slot
 # ---------------------------------------------------------------------------

@@ -19,5 +19,5 @@ DEFAULT_CREDENTIALS_PATH = str(_CONFIG_DIR / "credentials.json")
 # contains: Access Token (short-lived) and Refresh Token (long-lived)
 # this file allows the user to stay signed in between sessions
 DEFAULT_TOKEN_PATH = str(_CONFIG_DIR / "token.json")
-DEFAULT_LOG_DIR = "data/logs"
+DEFAULT_LOG_DIR = str(Path(__file__).parents[3] / "data" / "logs")
 DEFAULT_MAX_LOG_SIZE_MB = 5

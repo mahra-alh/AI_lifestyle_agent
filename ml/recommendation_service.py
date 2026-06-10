@@ -350,27 +350,3 @@ def _build_recommendation_list(
         results.append(rec)
 
     return results
-
-    for rank_pos, row in enumerate(ranked_df.itertuples(index=False)):
-        rec: Dict[str, Any] = {
-            "rank": rank_pos + 1,
-            "recommendation_id": recommendation_id,
-            "model_version": model_version,
-            "venue_id": str(getattr(row, "venue_id", f"venue_{rank_pos}")),
-            "name": getattr(row, "name", "Unknown venue"),
-            "model_score": round(float(getattr(row, "model_score", 0.0)), 4),
-            "faiss_score": round(float(getattr(row, "faiss_score", 0.0)), 4),
-        }
-        for col in [
-            "area", "location_area", "category", "primary_category",
-            "meal_cost_for_one", "budget_level", "description",
-            "has_outdoor_seating", "serves_alcohol", "has_shisha",
-            "latitude", "longitude",
-        ]:
-            val = getattr(row, col, None)
-            if val is not None and not (isinstance(val, float) and np.isnan(val)):
-                rec[col] = val
-
-        results.append(rec)
-
-    return results

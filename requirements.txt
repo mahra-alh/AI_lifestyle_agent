@@ -4,6 +4,10 @@
 numpy==2.4.6
 pandas==3.0.3
 
+# web server
+fastapi==0.115.14
+uvicorn[standard]==0.34.3
+
 # agent and tools
 openai-agents==0.17.4    # agent SDK
 requests==2.34.2         # http

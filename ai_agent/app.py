@@ -1,111 +1,96 @@
-"""
-ai_agent/app.py
-================
-
-Agent entry point. Defines the agent and exposes run_agent() for the
-backend to call.
-"""
 import os
-from datetime import datetime
+import asyncio
+import uuid
+from datetime import datetime, timedelta
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
-
-from agents import Agent, Runner
+from agents import Agent, Runner, function_tool
 from dotenv import load_dotenv
-
-from ai_agent.logger.app_logger import create_trace_id, log_event, set_trace_id
+from ai_agent.tools.weather import get_weather_forecast
+from ai_agent.tools.calendar.availability import get_calendar
+from ai_agent.tools.calendar.booking import book_activity
 from ai_agent.tools.calendar.free_slots import get_free_slots
-from ai_agent.tools.calendar.full_calendar_tool import book_activity, get_calendar
-from ai_agent.tools.recommendation_tool import get_recommendations
-from ai_agent.tools.user_profile_pkg.tools import (
+from ai_agent.tools.user_profile_pkg import (
+    ml_export,
     get_user_profile,
+    update_user_profile,
     log_activity_preference,
     log_recommendation_feedback,
-    update_user_profile,
 )
-from ai_agent.tools.weather.tool import get_weather_forecast
+from ai_agent.logger.app_logger import create_trace_id, set_trace_id, log_event
+from ai_agent.tools.recommendation_tool import get_recommendations
 
+# Load environment variables used by API clients and tools.
 load_dotenv()
 
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 APP_TIMEZONE = "Asia/Dubai"
 
-# ---------------------------------------------------------------------------
-# Agent definition
-# ---------------------------------------------------------------------------
+# Per-user conversation history. Keyed by normalized user_id (email).
+# Stores the full message list returned by Runner.to_input_list() so each
+# turn continues the same conversation rather than starting fresh.
+_CONVERSATION_HISTORY: dict[str, list] = {}
 
+# Define the agent instructions, available tools, and model.
 agent = Agent(
     name="Lifestyle AI Agent",
     instructions="""
 You are a Dubai lifestyle planning assistant.
 
-Your job is to help users discover and schedule suitable activities based on
-their profile, preferences, budget, location, weather, and calendar availability.
+The user's profile is always complete before they reach this chat — never ask for profile information.
+The user's email is already provided as the Known user_id. Never ask for it.
 
-The user's profile is identified by email address.
+When the user asks for activity suggestions:
+1. Call get_user_profile with the known user_id to load their saved preferences.
+2. Call get_weather_forecast to check today's weather conditions.
+3. Call get_calendar to check calendar availability for the requested time.
+4. Call get_recommendations with the profile, weather, and calendar data.
+5. Present the ranked results clearly. Ask which option they want to book.
+6. When the user picks an option AND has stated a specific date and time,
+   call book_activity. This only PREPARES the booking — it shows a
+   confirmation card in the app that the user must tap to finish.
+   After calling it, tell the user to confirm or cancel on the card.
+   NEVER say the booking is complete; the card does the actual booking.
 
-Available tools:
-- get_user_profile / update_user_profile
-- log_activity_preference / log_recommendation_feedback
-- get_weather_forecast
-- get_calendar
-- get_free_slots
-- get_recommendations
-- book_activity
+If get_recommendations returns no results or an error:
+- Tell the user recommendations are temporarily unavailable.
+- Do NOT invent or guess activity names. Do not fabricate venues.
 
-Main flow:
+When the user reacts to a suggestion, log it:
+- Clicks or bookings → log_activity_preference
+- Explicit feedback (liked/disliked) → log_recommendation_feedback
 
-1. Ask for the user's email address first. Do not proceed without it.
-2. Call get_user_profile using the email as user_id.
-   - If profile_complete is true: continue to activity planning.
-   - If profile_complete is false: ask only for the missing_fields returned.
-   - If no profile: ask for required_fields, save with update_user_profile, then continue.
-3. Call get_weather_forecast for the user's area.
-4. If the user specifies a time: call get_calendar to confirm the slot is free.
-   If the user says "when am I free" or does not specify a time: call get_free_slots
-   to discover available windows, then present options before recommending.
-5. Call get_recommendations with the user query, weather context, and calendar context.
-   - The tool handles new users automatically (cold-start fallback).
-   - Pass weather_outdoor_suitable from the weather tool result.
-   - Pass calendar_is_free and the free slot times from the calendar tool.
-6. Present the recommendations clearly. Explain why each fits the user.
-7. Ask which option the user wants to schedule.
-8. Call book_activity only after the user explicitly confirms.
-9. Log the user's reaction using log_activity_preference (clicked/booked/declined).
-10. One day after the activity, prompt the user for explicit feedback and call
-    log_recommendation_feedback with their rating and liked/disliked/neutral response.
+Feedback is NOT booking consent:
+- Statements like "I liked X", "X sounds good", or "great suggestion" are
+  feedback only. Log them with log_recommendation_feedback, then ask:
+  "Would you like me to book it?" Do not call book_activity for them.
 
 Rules:
-- Never book without explicit confirmation.
-- If get_calendar reports is_free=false, do not recommend activities in that slot.
-  Offer to find a free window using get_free_slots instead.
-- If weather outdoor_suitable is false, suggest only indoor or covered options
-  unless the user explicitly says they want outdoor anyway.
-- Use Asia/Dubai for all date/time interpretation.
-- Interpret 12-hour time correctly: 9pm = 21:00, 9am = 09:00.
-- For schedule summaries, use busy_slots_local (already in Asia/Dubai).
-- For weather summaries, use ml_weather_features[].weekday_name for day labels.
+- Never ask for profile details — the profile is already saved.
+- Never invent venue names or activities.
+- If the requested time is busy in the calendar, use get_free_slots to
+  suggest alternative free windows.
+- If outdoor_comfort_flag is poor_for_outdoor, recommend indoor options only.
+- Use Asia/Dubai timezone. 9 pm = 21:00, 9 am = 09:00.
+- Never choose a date or time yourself. If the user has not stated one,
+  ask one short clarification before calling book_activity.
 - Keep responses short, practical, and action-oriented.
-- Do not invent profile information.
 """,
-    tools=[
-        get_user_profile,
-        update_user_profile,
-        log_activity_preference,
-        log_recommendation_feedback,
-        get_weather_forecast,
-        get_calendar,
-        get_free_slots,
-        get_recommendations,
-        book_activity,
-    ],
+    tools=[get_user_profile,
+           update_user_profile,
+           log_activity_preference,
+           log_recommendation_feedback,
+           get_recommendations,
+           get_weather_forecast,
+           get_calendar,
+           get_free_slots,
+           book_activity
+           ],
     model="gpt-4o-mini",
 )
 
-
-# ---------------------------------------------------------------------------
-# Runner
-# ---------------------------------------------------------------------------
-
-def run_agent(user_id: str, user_message: str) -> str:
+async def run_agent(user_id: str, user_message: str):
+    # Create a trace ID so logs from this request can be grouped together.
     trace_id = create_trace_id()
     set_trace_id(trace_id)
 
@@ -116,16 +101,38 @@ def run_agent(user_id: str, user_message: str) -> str:
     )
 
     try:
-        now_dubai = datetime.now(ZoneInfo(APP_TIMEZONE)).isoformat()
-
-        result = Runner.run_sync(
-            agent,
-            input=(
-                f"Known user_id/email for tool calls: {user_id}\n\n"
-                f"Current local time ({APP_TIMEZONE}): {now_dubai}\n\n"
-                f"User message:\n{user_message}"
-            ),
+        now = datetime.now(ZoneInfo(APP_TIMEZONE))
+        tomorrow = now + timedelta(days=1)
+        time_context = (
+            f"Today is {now.strftime('%A, %Y-%m-%d %H:%M')} ({APP_TIMEZONE}). "
+            f"Tomorrow is {tomorrow.strftime('%A, %Y-%m-%d')}."
         )
+        existing_history = _CONVERSATION_HISTORY.get(user_id, [])
+
+        if existing_history:
+            # Continue the existing conversation. The user_id context is already
+            # in the history from the first turn, so only inject the current time.
+            run_input = existing_history + [
+                {
+                    "role": "user",
+                    "content": (
+                        f"Current local time ({APP_TIMEZONE}): {time_context}\n\n"
+                        f"User message:\n{user_message}"
+                    ),
+                }
+            ]
+        else:
+            # First turn: establish user identity and time context for the whole session.
+            run_input = (
+                f"Known user_id/email for tool calls: {user_id}\n\n"
+                f"Current local time ({APP_TIMEZONE}): {time_context}\n\n"
+                f"User message:\n{user_message}"
+            )
+
+        result = await Runner.run(agent, input=run_input)
+
+        # Persist the full conversation so the next turn continues from here.
+        _CONVERSATION_HISTORY[user_id] = result.to_input_list()
 
         log_event(
             event_name="agent_request_completed",
@@ -135,6 +142,7 @@ def run_agent(user_id: str, user_message: str) -> str:
                 "status": "success",
             },
         )
+
         return result.final_output
 
     except Exception as error:
@@ -149,33 +157,41 @@ def run_agent(user_id: str, user_message: str) -> str:
             },
         )
         raise
+    
+async def main():
+    
+    default_email = ""
+    user_id = input(f"Email [{default_email}]: ").strip() or default_email
 
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
-
-def main() -> None:
-    user_id = input("Email: ").strip()
     if not user_id:
         raise ValueError("Email is required.")
 
-    user_message = input("Message: ").strip()
+    default_message = ""
+    user_message = input(f"Message [{default_message}]: ").strip() or default_message
+
     if not user_message:
         raise ValueError("Message is required.")
 
-    result = run_agent(user_id=user_id, user_message=user_message)
+    result = await run_agent(user_id=user_id, user_message=user_message)
     print(result)
 
-    decision = input("Accept recommendations? (accept/decline): ").strip().lower()
-    if decision in {"accept", "decline"}:
-        follow_up = (
+    default_recommendation_decision = ""
+    recommendation_decision = input(
+        f"Accept recommendations? (accept/decline) [{default_recommendation_decision}]: "
+    ).strip().lower() or default_recommendation_decision
+
+    if recommendation_decision not in {"accept", "decline", ""}:
+        raise ValueError("Please enter 'accept' or 'decline'.")
+
+    if recommendation_decision in {"accept", "decline"}:
+        follow_up_message = (
             "I accept the recommendations."
-            if decision == "accept"
+            if recommendation_decision == "accept"
             else "I decline the recommendations."
         )
-        print(run_agent(user_id=user_id, user_message=follow_up))
-
+        follow_up_result = await run_agent(user_id=user_id, user_message=follow_up_message)
+        print(follow_up_result)
 
 if __name__ == "__main__":
-    main()
+    # Start the local terminal entry point when this file is executed directly.
+    asyncio.run(main())

@@ -18,7 +18,7 @@ _trace_id_context: ContextVar[Optional[str]] = ContextVar(
     default=None
 )
 
-LOG_DIR = Path("logs")
+LOG_DIR = Path(__file__).parents[2] / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
 APP_LOG_PATH = LOG_DIR / "app.jsonl"

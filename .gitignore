@@ -56,6 +56,7 @@ serviceAccountKey.json
 *key*.json
 *.log
 *.jsonl
+config/*.json
 
 # MACHINE LEARNING FILES
 # Trained model files (can be large, avoid committing unless needed)
@@ -64,7 +65,7 @@ serviceAccountKey.json
 *.pt       # PyTorch models
 *.onnx     # ONNX models
 backend/config/serviceAccountKey.json
-firebase-adminsdk*.json
+*firebase-adminsdk*.json
 backend/data/
 *.bin
 *.npy
