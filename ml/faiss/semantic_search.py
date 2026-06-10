@@ -1,17 +1,17 @@
 """
+ml/faiss/semantic_search.py
+============================
+
 Production FAISS retriever.
 
-Loads model and index once at startup (lazy singleton) and exposes a
-single search() method used by the recommendation service.
-
-Artifact paths are resolved from environment variables so they can be
-pointed at local files during development and at GCS/mounted paths in
-production without code changes.
+Loads the index and lookup table directly from GCS into memory on first
+use — no local files created or required.
 """
 from __future__ import annotations
 
+import io
 import os
-from pathlib import Path
+import tempfile
 from typing import Optional
 
 import faiss
@@ -19,19 +19,17 @@ import numpy as np
 import pandas as pd
 from sentence_transformers import SentenceTransformer
 
-# Artifact paths — override via environment variables
+from ai_agent.storage.google_cloud_storage import (
+    GCS_FAISS_INDEX_PATH,
+    GCS_FAISS_LOOKUP_PATH,
+    download_bytes,
+)
 
-_DEFAULT_BASE = Path(__file__).parents[2] / "models"
+EMBEDDING_MODEL = os.getenv("FAISS_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
-FAISS_INDEX_PATH = Path(
-    os.getenv("FAISS_INDEX_PATH", str(_DEFAULT_BASE / "faiss_index.bin"))
-)
-FAISS_LOOKUP_PATH = Path(
-    os.getenv("FAISS_LOOKUP_PATH", str(_DEFAULT_BASE / "faiss_lookup.csv"))
-)
-EMBEDDING_MODEL_NAME = os.getenv(
-    "FAISS_EMBEDDING_MODEL", "all-MiniLM-L6-v2"
-)
+# ---------------------------------------------------------------------------
+# Lazy singleton
+# ---------------------------------------------------------------------------
 
 _retriever: Optional["FAISSRetriever"] = None
 
@@ -44,69 +42,66 @@ def get_retriever() -> "FAISSRetriever":
     return _retriever
 
 
+# ---------------------------------------------------------------------------
+# Retriever
+# ---------------------------------------------------------------------------
+
 class FAISSRetriever:
     """
     Wraps a FAISS flat-IP index and the lookup DataFrame.
 
-    The index must have been built with normalized embeddings (cosine
-    similarity) using build_faiss.py.
+    On initialization, downloads both artifacts from GCS into memory.
+    No files are written to disk.
     """
 
-    def __init__(
-        self,
-        index_path: Path = FAISS_INDEX_PATH,
-        lookup_path: Path = FAISS_LOOKUP_PATH,
-        model_name: str = EMBEDDING_MODEL_NAME,
-    ) -> None:
-        if not index_path.exists():
-            raise FileNotFoundError(
-                f"FAISS index not found at '{index_path}'. "
-                "Run ml/faiss/build_faiss.py first."
-            )
-        if not lookup_path.exists():
-            raise FileNotFoundError(
-                f"FAISS lookup CSV not found at '{lookup_path}'. "
-                "Run ml/faiss/build_faiss.py first."
-            )
+    def __init__(self, model_name: str = EMBEDDING_MODEL) -> None:
+        print("Initializing FAISSRetriever — loading from GCS...")
 
+        # Load embedding model
         self.model = SentenceTransformer(model_name)
-        self.index = faiss.read_index(str(index_path))
-        self.lookup_df = pd.read_csv(lookup_path)
 
-    def search(
-        self,
-        query: str,
-        k: int = 50,
-    ) -> pd.DataFrame:
+        # Load FAISS index from GCS bytes
+        # faiss.read_index requires a file path, so we use a temp file
+        # that is deleted immediately after loading.
+        index_bytes = download_bytes(GCS_FAISS_INDEX_PATH)
+        with tempfile.NamedTemporaryFile(suffix=".bin", delete=True) as tmp:
+            tmp.write(index_bytes)
+            tmp.flush()
+            self.index = faiss.read_index(tmp.name)
+
+        # Load lookup CSV from GCS bytes directly into DataFrame
+        lookup_bytes = download_bytes(GCS_FAISS_LOOKUP_PATH)
+        self.lookup_df = pd.read_csv(io.BytesIO(lookup_bytes))
+
+        print(
+            f"FAISSRetriever ready: "
+            f"{self.index.ntotal} vectors, "
+            f"{len(self.lookup_df)} venues"
+        )
+
+    def search(self, query: str, k: int = 50) -> pd.DataFrame:
         """
         Retrieve the top-k most semantically similar venues for a query.
 
         Args:
-            query: Natural-language query from the user, e.g.
+            query: Natural-language query, e.g.
                    "cheap outdoor brunch near the marina".
-            k:     Number of candidates to retrieve. Should be larger than
-                   the final number of results (e.g. 50) so LightGBM has
-                   enough candidates to rerank down to 5.
+            k:     Number of candidates to retrieve before LightGBM reranks.
 
         Returns:
-            DataFrame of candidate rows from the lookup CSV, with an added
-            `faiss_score` column (cosine similarity, higher = more similar).
-            Rows are sorted by faiss_score descending.
+            DataFrame with a `faiss_score` column, sorted descending.
         """
-        # Embed the query with the same model used to build the index.
         xq = self.model.encode(
             [query],
             convert_to_numpy=True,
             normalize_embeddings=True,
         ).astype(np.float32)
 
-        # Search the FAISS index.
         scores, indices = self.index.search(xq, k)
 
-        # Build results DataFrame.
-        valid_mask = indices[0] >= 0  # FAISS returns -1 for padding
+        valid_mask    = indices[0] >= 0
         valid_indices = indices[0][valid_mask]
-        valid_scores = scores[0][valid_mask]
+        valid_scores  = scores[0][valid_mask]
 
         results = self.lookup_df.iloc[valid_indices].copy().reset_index(drop=True)
         results["faiss_score"] = valid_scores
