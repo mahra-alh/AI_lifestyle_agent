@@ -85,15 +85,20 @@ def _dependency_snapshot() -> dict[str, Any]:
         recommender_status = {"ready": True, "model_version": model_version}
     except Exception as exc:
         recommender_status = {"ready": False, "error": str(exc)}
+    # Check via secret_manager so this works both locally (env vars) and in
+    # production (Secret Manager) — os.getenv alone misses SM-provided keys.
     weather_api_key_present = bool(
-        os.getenv("WEATHER_API_KEY") or os.getenv("VISUAL_CROSSING_API_KEY")
+        get_secret_optional("WEATHER_API_KEY")
+        or get_secret_optional("VISUAL_CROSSING_API_KEY")
     )
     openai_api_key_present = bool(os.getenv("OPENAI_API_KEY"))
 
     try:
         get_calendar_service()
         calendar_service = {"booking_ready": True, "booking_required": False}
-    except RuntimeError:
+    except Exception:
+        # Any auth failure (missing/expired/revoked token, locked file, API
+        # error) means booking is unavailable — never crash the health check.
         calendar_service = {"booking_ready": False, "booking_required": True}
 
     ready = (
@@ -244,6 +249,51 @@ def feedback(request: FeedbackRequest) -> dict[str, Any]:
         )
     except Exception as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
+
+@app.get("/api/venue/{venue_name}")
+def venue_details(venue_name: str) -> dict[str, Any]:
+    """
+    Look up one venue by name in the venue pool.
+
+    Used by the frontend when the user clicks a recommendation card to
+    see full venue details (area, cost, category, description, ...).
+    """
+    cleaned = venue_name.strip().lower()
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="venue name cannot be empty.")
+
+    try:
+        import math
+
+        from ml.recommendation_service import _get_venue_pool
+
+        pool = _get_venue_pool()
+        names = pool["name"].astype(str).str.strip().str.lower()
+
+        matches = pool[names == cleaned]
+        if matches.empty:
+            # Fall back to a contains-match (card names are parsed from chat text)
+            matches = pool[names.str.contains(cleaned, regex=False, na=False)]
+
+        if matches.empty:
+            raise HTTPException(status_code=404, detail="Venue not found.")
+
+        # Convert the row to plain JSON-safe Python values (no numpy types/NaN).
+        venue: dict[str, Any] = {}
+        for key, value in matches.iloc[0].to_dict().items():
+            if hasattr(value, "item"):
+                value = value.item()
+            if isinstance(value, float) and math.isnan(value):
+                value = None
+            venue[key] = value
+
+        return {"status": "success", "venue": venue}
+
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:

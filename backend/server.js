@@ -181,6 +181,16 @@ app.post("/api/bookings/:pending_id/cancel", async (req, res) => {
   res.status(pythonResponse.status).json(pythonResponse.body);
 });
 
+app.get("/api/venue/:venue_name", async (req, res) => {
+  const venueName = encodeURIComponent(String(req.params.venue_name || "").trim());
+  const pythonResponse = await fetchJson(
+    `${PYTHON_AGENT_URL}/api/venue/${venueName}`,
+    {},
+    15000
+  );
+  res.status(pythonResponse.status).json(pythonResponse.body);
+});
+
 app.post("/api/chat", async (req, res) => {
   const { user_id, user_message } = req.body || {};
 

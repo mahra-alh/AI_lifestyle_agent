@@ -4,11 +4,26 @@ const WEATHER_CONDITIONS = [
 ];
 
 function extractWeather(text) {
+  // Preferred: the agent's standard first line, e.g.
+  // "Weather for Friday, 2026-06-12: 34°C, Sunny"
+  const dated = text.match(
+    /Weather for ([^:\n]+):\s*(-?\d+(?:\.\d+)?)\s*°C[,\s]*([^\n.]*)/i
+  );
+  if (dated) {
+    return {
+      dateLabel: dated[1].trim(),
+      temp: Math.round(parseFloat(dated[2])),
+      condition: dated[3].trim() || null,
+    };
+  }
+
+  // Fallback: any temperature / condition words found in the text
   const tempMatch = text.match(/(\d+)\s*°C/);
   const lower = text.toLowerCase();
   const condition = WEATHER_CONDITIONS.find((c) => lower.includes(c));
   if (!tempMatch && !condition) return null;
   return {
+    dateLabel: null,
     temp: tempMatch ? parseInt(tempMatch[1]) : null,
     condition: condition
       ? condition.split(" ").map((w) => w[0].toUpperCase() + w.slice(1)).join(" ")

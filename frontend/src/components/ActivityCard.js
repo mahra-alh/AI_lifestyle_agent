@@ -41,6 +41,37 @@ function getMatchStyle(score) {
   return { bg: "#431407", text: "#fb923c" };
 }
 
+// Venue fields shown in the expanded details view, in display order.
+// [key in the venue pool row, label, formatter]
+const DETAIL_FIELDS = [
+  ["area", "📍 Area", null],
+  ["location_area", "📍 Area", null],
+  ["category", "🏷 Category", null],
+  ["primary_category", "🏷 Category", null],
+  ["budget_level", "💰 Budget level", null],
+  ["meal_cost_for_one", "💵 Cost for one", (v) => `AED ${Number(v).toFixed(0)}`],
+  ["has_outdoor_seating", "🌤 Outdoor seating", yesNo],
+  ["serves_alcohol", "🍷 Serves alcohol", yesNo],
+  ["has_shisha", "💨 Shisha", yesNo],
+];
+
+function yesNo(v) {
+  return v === true || v === 1 || v === "1" ? "Yes" : "No";
+}
+
+function buildDetailRows(venue) {
+  const rows = [];
+  const usedLabels = new Set();
+  for (const [key, label, format] of DETAIL_FIELDS) {
+    const value = venue[key];
+    if (value === null || value === undefined || value === "") continue;
+    if (usedLabels.has(label)) continue; // skip duplicate-label fallbacks
+    usedLabels.add(label);
+    rows.push([label, format ? format(value) : String(value)]);
+  }
+  return rows;
+}
+
 function ActivityCard({ item, userEmail, rank }) {
   const { name, description, score, indoorOutdoor, duration } = item;
   const matchStyle = getMatchStyle(score);
@@ -50,6 +81,33 @@ function ActivityCard({ item, userEmail, rank }) {
 
   // null = no feedback yet, "liked"/"disliked" = sent, "sending" = in flight
   const [feedbackState, setFeedbackState] = useState(null);
+
+  // Expanded venue details
+  const [expanded, setExpanded] = useState(false);
+  const [venue, setVenue] = useState(null);
+  // idle | loading | loaded | error
+  const [detailsState, setDetailsState] = useState("idle");
+
+  async function toggleDetails() {
+    const next = !expanded;
+    setExpanded(next);
+
+    // Fetch venue details from the backend the first time the card is opened.
+    if (next && detailsState === "idle") {
+      setDetailsState("loading");
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/venue/${encodeURIComponent(name)}`
+        );
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Venue not found");
+        setVenue(data.venue);
+        setDetailsState("loaded");
+      } catch (err) {
+        setDetailsState("error");
+      }
+    }
+  }
 
   async function sendFeedback(feedback) {
     if (feedbackState) return; // already sent or sending
@@ -80,62 +138,117 @@ function ActivityCard({ item, userEmail, rank }) {
     }
   }
 
+  const detailRows = venue ? buildDetailRows(venue) : [];
+  const venueDescription =
+    venue && venue.description && String(venue.description).trim();
+  const mapsLink =
+    venue && venue.latitude && venue.longitude
+      ? `https://www.google.com/maps?q=${venue.latitude},${venue.longitude}`
+      : null;
+
   return (
-    <div style={styles.card}>
-      <div style={styles.left}>
-        <span style={styles.icon}>{getIcon(name)}</span>
-        <div style={styles.body}>
-          <div style={styles.name}>{name}</div>
-          {cleanDescription && <div style={styles.description}>{cleanDescription}</div>}
-          {(duration || indoorOutdoor) && (
-            <div style={styles.tags}>
-              {duration && (
-                <span style={styles.tag}>⏱ {duration}</span>
-              )}
-              {indoorOutdoor && (
-                <span style={styles.tag}>{indoorOutdoor}</span>
-              )}
+    <div style={styles.card} onClick={toggleDetails} title="Click for venue details">
+      <div style={styles.topRow}>
+        <div style={styles.left}>
+          <span style={styles.icon}>{getIcon(name)}</span>
+          <div style={styles.body}>
+            <div style={styles.name}>{name}</div>
+            {cleanDescription && <div style={styles.description}>{cleanDescription}</div>}
+            {(duration || indoorOutdoor) && (
+              <div style={styles.tags}>
+                {duration && (
+                  <span style={styles.tag}>⏱ {duration}</span>
+                )}
+                {indoorOutdoor && (
+                  <span style={styles.tag}>{indoorOutdoor}</span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+        <div style={styles.right}>
+          {matchStyle && (
+            <div
+              style={{
+                ...styles.badge,
+                backgroundColor: matchStyle.bg,
+                color: matchStyle.text,
+              }}
+            >
+              {score}% match
             </div>
           )}
-        </div>
-      </div>
-      <div style={styles.right}>
-        {matchStyle && (
-          <div
-            style={{
-              ...styles.badge,
-              backgroundColor: matchStyle.bg,
-              color: matchStyle.text,
-            }}
-          >
-            {score}% match
+          <div style={styles.feedbackRow}>
+            <button
+              style={{
+                ...styles.feedbackButton,
+                ...(feedbackState === "liked" ? styles.feedbackLiked : {}),
+              }}
+              onClick={(e) => {
+                e.stopPropagation(); // don't toggle details when voting
+                sendFeedback("liked");
+              }}
+              disabled={!!feedbackState}
+              title="I like this suggestion"
+            >
+              👍
+            </button>
+            <button
+              style={{
+                ...styles.feedbackButton,
+                ...(feedbackState === "disliked" ? styles.feedbackDisliked : {}),
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                sendFeedback("disliked");
+              }}
+              disabled={!!feedbackState}
+              title="Not for me"
+            >
+              👎
+            </button>
           </div>
-        )}
-        <div style={styles.feedbackRow}>
-          <button
-            style={{
-              ...styles.feedbackButton,
-              ...(feedbackState === "liked" ? styles.feedbackLiked : {}),
-            }}
-            onClick={() => sendFeedback("liked")}
-            disabled={!!feedbackState}
-            title="I like this suggestion"
-          >
-            👍
-          </button>
-          <button
-            style={{
-              ...styles.feedbackButton,
-              ...(feedbackState === "disliked" ? styles.feedbackDisliked : {}),
-            }}
-            onClick={() => sendFeedback("disliked")}
-            disabled={!!feedbackState}
-            title="Not for me"
-          >
-            👎
-          </button>
+          <span style={styles.expandHint}>{expanded ? "▲ less" : "▼ details"}</span>
         </div>
       </div>
+
+      {expanded && (
+        <div style={styles.details} onClick={(e) => e.stopPropagation()}>
+          {detailsState === "loading" && (
+            <div style={styles.detailsNote}>Loading venue details…</div>
+          )}
+          {detailsState === "error" && (
+            <div style={styles.detailsNote}>
+              Could not load details for this venue.
+            </div>
+          )}
+          {detailsState === "loaded" && (
+            <>
+              {venueDescription && (
+                <div style={styles.detailsDescription}>{venueDescription}</div>
+              )}
+              <div style={styles.detailsGrid}>
+                {detailRows.map(([label, value]) => (
+                  <div key={label} style={styles.detailRow}>
+                    <span style={styles.detailLabel}>{label}</span>
+                    <span style={styles.detailValue}>{value}</span>
+                  </div>
+                ))}
+              </div>
+              {mapsLink && (
+                <a
+                  href={mapsLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={styles.mapsLink}
+                >
+                  🗺 Open in Google Maps
+                </a>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -143,13 +256,18 @@ function ActivityCard({ item, userEmail, rank }) {
 const styles = {
   card: {
     display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    flexDirection: "column",
     backgroundColor: "#1a1b26",
     border: "1px solid #2a2d3e",
     borderRadius: "10px",
     padding: "12px 14px",
     marginBottom: "8px",
+    cursor: "pointer",
+  },
+  topRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: "12px",
   },
   left: {
@@ -230,6 +348,54 @@ const styles = {
   feedbackDisliked: {
     backgroundColor: "#431407",
     borderColor: "#fb923c",
+  },
+  expandHint: {
+    fontSize: "10px",
+    color: "#64748b",
+  },
+  details: {
+    marginTop: "10px",
+    paddingTop: "10px",
+    borderTop: "1px solid #2a2d3e",
+    cursor: "default",
+  },
+  detailsNote: {
+    fontSize: "12px",
+    color: "#64748b",
+  },
+  detailsDescription: {
+    fontSize: "12px",
+    color: "#cbd5e1",
+    lineHeight: "1.5",
+    marginBottom: "8px",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+  },
+  detailsGrid: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+  },
+  detailRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "12px",
+    fontSize: "12px",
+  },
+  detailLabel: {
+    color: "#64748b",
+    flexShrink: 0,
+  },
+  detailValue: {
+    color: "#e2e8f0",
+    textAlign: "right",
+    wordBreak: "break-word",
+  },
+  mapsLink: {
+    display: "inline-block",
+    marginTop: "8px",
+    fontSize: "12px",
+    color: "#60a5fa",
   },
 };
 

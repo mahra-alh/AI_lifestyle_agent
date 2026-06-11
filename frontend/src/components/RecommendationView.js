@@ -15,6 +15,7 @@ function RecommendationView({ parsed, userEmail }) {
           {weather && (
             <span style={styles.pill}>
               {weatherIcon(weather.condition)}{" "}
+              {weather.dateLabel ? `${weather.dateLabel} — ` : ""}
               {weather.temp !== null ? `${weather.temp}°C` : ""}{" "}
               {weather.condition || ""}
             </span>
