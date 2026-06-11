@@ -1,0 +1,36 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Node
+node_modules/
+
+# Secrets — never in image
+.env
+*.env
+credentials.json
+token.json
+*firebase-adminsdk*.json
+
+# Local dev artefacts
+config/
+old_code/
+logs/
+/data/
+
+# VCS
+.git/
+.gitignore
+
+# Services not built by this Dockerfile
+frontend/
+backend/
+
+# Misc
+*.md
+.DS_Store

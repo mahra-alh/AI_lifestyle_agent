@@ -125,8 +125,13 @@ def _refresh_or_login(
             print("[auth] Existing token expired. Trying to refresh it...")
             # send a refresh request to Google servers
             creds.refresh(Request())
-            # save the updated token information locally
-            _save_token(creds, token_path)
+             # save the updated token locally — may fail on read-only filesystems
+            # (e.g. Cloud Run secret mounts); the refreshed token still works
+            # in memory for this instance, so a failed save is not fatal
+            try:
+                _save_token(creds, token_path)
+            except OSError:
+                print("[auth] Could not save refreshed token (read-only filesystem). Using in-memory token.")
             print("[auth] Token refreshed successfully.")
             return creds
 
